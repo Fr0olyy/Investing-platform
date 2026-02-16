@@ -1,0 +1,9 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+asyncpg
+pydantic
+pydantic-settings
+python-jose[cryptography]  # Для работы с JWT
+passlib[bcrypt]            # Для хеширования паролей
+python-multipart           # Для формы логина в Swagger
