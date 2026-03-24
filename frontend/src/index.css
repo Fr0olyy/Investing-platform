@@ -1,162 +1,211 @@
-/* --- ИСПРАВЛЕНИЯ ДИЗАЙНА --- */
-
-/* Сброс центрирования для карточек (Новости и Профиль) */
-.card {
-  text-align: left;
+:root {
+  --bg-main: #0B1120;
+  --bg-sidebar: #0F172A;
+  --bg-card: #1E293B;
+  --text-main: #F8FAFC;
+  --text-muted: #94A3B8;
+  --accent: #3B82F6;
+  --green: #10B981;
+  --red: #EF4444;
 }
 
-/* Красивые поля ввода */
-.input-group {
+body {
+  margin: 0;
+  font-family: 'Inter', -apple-system, sans-serif;
+  background-color: var(--bg-main);
+  color: var(--text-main);
+}
+
+/* Каркас приложения: Сайдбар слева, контент справа */
+.app-container {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 250px;
+  background-color: var(--bg-sidebar);
+  padding: 20px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-bottom: 20px;
-  text-align: left;
+  border-right: 1px solid #1e293b;
 }
 
-.input-group label {
-  color: var(--text-muted);
-  font-size: 0.9rem;
+.main-content {
+  flex: 1;
+  padding: 30px;
+  overflow-y: auto;
 }
 
-.input-group input {
-  padding: 12px 16px;
-  border-radius: 8px;
-  border: 1px solid #334155;
-  background-color: #0F172A;
-  color: white;
-  outline: none;
-  font-family: inherit;
-  transition: border-color 0.2s;
+/* Навигация */
+.sidebar-logo {
+  margin-bottom: 30px;
 }
 
-.input-group input:focus {
-  border-color: var(--accent);
-}
-
-/* Карточка авторизации и профиля */
-.auth-container {
+.nav-link {
   display: flex;
   align-items: center;
-  justify-content: center;
-  min-height: 100vh;
-  width: 100%;
+  gap: 12px;
+  padding: 12px 16px;
+  color: var(--text-muted);
+  text-decoration: none;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  transition: 0.2s;
 }
 
-.auth-card, .profile-form-card {
-  background-color: var(--bg-card);
-  padding: 40px;
-  border-radius: 12px;
-  width: 100%;
-  max-width: 450px;
-  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
-  margin: 0 auto;
+.nav-link:hover, .nav-link.active {
+  background-color: var(--accent);
+  color: white;
 }
 
-.auth-card h2, .profile-form-card h2 {
-  text-align: center;
-  margin-bottom: 24px;
+.sidebar-footer {
+  margin-top: auto;
 }
 
-/* Исправление профиля пользователя в боковом меню */
 .user-profile-link {
   display: flex;
   align-items: center;
   gap: 12px;
+  padding-top: 16px;
+  border-top: 1px solid #1e293b;
   text-decoration: none;
   color: var(--text-main);
-  padding: 16px 0 0 0;
-  border-top: 1px solid #1e293b;
-  margin-top: auto;
-}
-
-.user-profile-link:hover {
-  color: var(--accent);
 }
 
 .avatar {
-  width: 40px;
-  height: 40px;
+  width: 36px; height: 36px;
   border-radius: 50%;
   background-color: var(--accent);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: flex; justify-content: center; align-items: center;
   font-weight: bold;
 }
 
-.user-info {
-  display: flex;
-  flex-direction: column;
-}
+.user-info { display: flex; flex-direction: column; }
+.user-name { font-size: 0.9rem; }
+.user-email { font-size: 0.75rem; color: var(--text-muted); }
 
-.user-email {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-}
-
-/* --- СТРОГИЕ СТИЛИ ДЛЯ АВТОРИЗАЦИИ И КНОПОК --- */
-
-body {
-  background-color: #0B1120; /* Темный фон для всего сайта */
-  color: #F8FAFC;
-  font-family: 'Inter', -apple-system, sans-serif; /* Убираем уродливые шрифты с засечками */
-  margin: 0;
-}
-
-.auth-card {
-  background-color: #1E293B; /* Темно-синяя карточка */
-  color: #F8FAFC;
-  padding: 40px;
+/* Карточки и сетка дашборда */
+.card {
+  background-color: var(--bg-card);
   border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 24px;
+  margin-top: 24px;
+}
+
+.widget-list {
+  list-style: none;
+  padding: 0;
+  margin: 16px 0 0 0;
+}
+
+.widget-list li {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+  font-size: 0.9rem;
+}
+
+/* Таблицы рынка */
+.market-table {
   width: 100%;
-  max-width: 400px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
-  margin: 0 auto;
+  border-collapse: collapse;
+  margin-top: 20px;
+  background-color: var(--bg-card);
+  border-radius: 12px;
+  overflow: hidden;
 }
 
-.auth-card h2 {
-  text-align: center;
-  margin-top: 0;
-  margin-bottom: 24px;
+.market-table th, .market-table td {
+  padding: 16px;
+  text-align: left;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
 }
 
-.btn-primary {
-  background-color: #3B82F6; /* Красивый синий цвет */
-  color: white;
-  padding: 14px 16px;
-  border-radius: 8px;
-  border: none;
-  cursor: pointer;
-  font-weight: 600;
-  font-size: 1rem;
-  width: 100%;
-  margin-top: 10px;
-  transition: background-color 0.2s, transform 0.1s;
-}
-
-.btn-primary:hover {
-  background-color: #2563EB;
-}
-
-.btn-primary:active {
-  transform: scale(0.98);
-}
-
-.btn-primary:disabled {
-  background-color: #475569;
-  cursor: not-allowed;
-}
-
-.error-message {
-  background-color: rgba(239, 68, 68, 0.1);
-  color: #EF4444;
-  padding: 12px;
-  border-radius: 8px;
-  margin-bottom: 20px;
-  text-align: center;
-  border: 1px solid #EF4444;
-}
-
-.text-center { text-align: center; }
+.text-green { color: var(--green); }
+.text-red { color: var(--red); }
+.text-muted { color: var(--text-muted); }
 .mt-4 { margin-top: 16px; }
+
+/* --- СТИЛИ ДЛЯ РЫНКА, НОВОСТЕЙ И КНОПОК --- */
+
+.search-input {
+  width: 100%;
+  padding: 14px 20px;
+  border-radius: 8px;
+  border: 1px solid #1E293B;
+  background-color: #0F172A;
+  color: white;
+  outline: none;
+  font-family: inherit;
+  font-size: 1rem;
+  box-sizing: border-box;
+  margin-bottom: 20px;
+  transition: 0.2s;
+}
+
+.search-input:focus { border-color: var(--accent); }
+
+.filter-tags { display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap; }
+
+.tag {
+  background-color: transparent;
+  border: 1px solid #334155;
+  color: var(--text-muted);
+  padding: 8px 16px;
+  border-radius: 20px;
+  cursor: pointer;
+  transition: 0.2s;
+  font-family: inherit;
+}
+
+.tag.active, .tag:hover {
+  background-color: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+.btn-buy {
+  background-color: rgba(16, 185, 129, 0.1);
+  color: var(--green);
+  border: 1px solid var(--green);
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: bold;
+  transition: 0.2s;
+}
+
+.btn-buy:hover {
+  background-color: var(--green);
+  color: white;
+}
+
+.news-card { margin-bottom: 16px; cursor: pointer; transition: 0.2s; border: 1px solid transparent; }
+.news-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+
+/* Кнопка входа в сайдбаре */
+.btn-sidebar-login {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  padding: 12px;
+  background-color: var(--accent);
+  color: white;
+  border-radius: 8px;
+  text-decoration: none;
+  font-weight: 600;
+  transition: 0.2s;
+  box-sizing: border-box;
+}
+
+.btn-sidebar-login:hover { background-color: #2563EB; }

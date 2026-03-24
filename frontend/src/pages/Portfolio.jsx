@@ -1,16 +1,16 @@
 import { useState, useEffect } from 'react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
+import { Link } from 'react-router-dom';
 import { apiClient } from '../api/client';
-
-const COLORS = ['#3B82F6', '#64748B'];
 
 export default function Portfolio() {
   const [summary, setSummary] = useState(null);
   const [positions, setPositions] = useState([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState('');
+  const token = localStorage.getItem('token');
 
   useEffect(() => {
-    // Делаем два запроса параллельно: за сводкой и за позициями
+    if (!token) return; // Если нет токена, даже не пытаемся грузить
+
     Promise.all([
       apiClient('/portfolio/summary'),
       apiClient('/portfolio/positions')
@@ -18,82 +18,64 @@ export default function Portfolio() {
     .then(([sumData, posData]) => {
       setSummary(sumData);
       setPositions(posData);
-      setIsLoading(false);
     })
-    .catch(err => {
-      console.error("Ошибка загрузки портфеля:", err);
-      setIsLoading(false);
-    });
-  }, []);
+    .catch(err => setError(err.message));
+  }, [token]);
 
-  if (isLoading) return <div className="page-content"><h2>Загрузка портфеля...</h2></div>;
-  if (!summary) return <div className="page-content"><h2>Ошибка доступа. Вы авторизованы?</h2></div>;
+  // Красивая заглушка для неавторизованных
+  if (!token) {
+    return (
+      <div className="page-content">
+        <h1>Портфель</h1>
+        <div className="card mt-4" style={{textAlign: 'center', padding: '40px'}}>
+          <h2 style={{marginBottom: '10px'}}>Доступ закрыт</h2>
+          <p className="text-muted" style={{marginBottom: '20px'}}>
+            Чтобы просматривать свои активы и баланс, необходимо войти в систему.
+          </p>
+          <Link to="/login" className="btn-sidebar-login" style={{display: 'inline-block', width: 'auto', padding: '12px 24px'}}>
+            Войти в аккаунт
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
-  // Динамические данные для диаграммы
-  const pieData = [
-    { name: 'В активах', value: summary.invested_value || 0 },
-    { name: 'Кэш', value: summary.cash || 0 },
-  ];
+  if (error) return <div className="page-content text-red">Ошибка: {error}</div>;
+  if (!summary) return <div className="page-content">Загрузка портфеля...</div>;
 
   return (
     <div className="page-content">
-      <div className="page-header">
-        <h1>Портфель</h1>
-      </div>
-
-      <div className="portfolio-stats">
-        <div className="card stat-card">
+      <h1>Портфель</h1>
+      
+      <div className="dashboard-grid">
+        <div className="card">
           <p className="text-muted">Общая стоимость</p>
-          <h2>{summary.total_value?.toFixed(2)} ₽</h2>
+          <h2>{summary.total_value} ₽</h2>
           <p className={summary.pnl >= 0 ? 'text-green' : 'text-red'}>
-            {summary.pnl >= 0 ? '↗ +' : '↘ '} {summary.pnl?.toFixed(2)} ₽
+            PnL: {summary.pnl} ₽
           </p>
-          <p className="text-muted text-sm mt-4">Свободный кэш: {summary.cash?.toFixed(2)} ₽</p>
-        </div>
-        
-        <div className="card chart-card-small">
-          <p className="text-muted">Структура</p>
-          <div style={{ height: 120 }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={pieData} innerRadius={40} outerRadius={55} paddingAngle={5} dataKey="value">
-                  {pieData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <RechartsTooltip contentStyle={{ backgroundColor: '#0F172A', border: 'none' }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
+          <p className="text-muted mt-4">Свободный кэш: {summary.cash} ₽</p>
         </div>
       </div>
 
       <div className="card mt-4">
-        <h3>Мои активы</h3>
-        {positions.length === 0 ? (
-          <p className="text-muted mt-4">У вас пока нет купленных активов. Перейдите в раздел "Рынок", чтобы совершить первую сделку.</p>
-        ) : (
-          <table className="market-table">
-            <thead>
-              <tr>
-                <th>Тикер</th>
-                <th>Кол-во лотов</th>
-                <th>Ср. цена покупки</th>
-                <th>Текущая цена</th>
+        <h3>Открытые позиции</h3>
+        <table className="market-table">
+          <thead>
+            <tr>
+              <th>Тикер</th>
+              <th>Кол-во</th>
+            </tr>
+          </thead>
+          <tbody>
+            {positions.map(pos => (
+              <tr key={pos.ticker}>
+                <td className="ticker">{pos.ticker}</td>
+                <td>{pos.quantity}</td>
               </tr>
-            </thead>
-            <tbody>
-              {positions.map((pos) => (
-                <tr key={pos.ticker}>
-                  <td className="ticker">{pos.ticker}</td>
-                  <td>{pos.quantity}</td>
-                  <td>{pos.average_price?.toFixed(2)} ₽</td>
-                  <td>{pos.current_price?.toFixed(2)} ₽</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

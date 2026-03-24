@@ -33,7 +33,7 @@ export default function Dashboard() {
         </div>
 
         {/* Боковые виджеты */}
-        <div className="dashboard-sidebar">
+        <div>
           <div className="card">
             <h3>Лидеры рынка</h3>
             <ul className="widget-list">

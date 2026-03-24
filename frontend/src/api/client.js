@@ -8,27 +8,19 @@ export const apiClient = async (endpoint, options = {}) => {
     ...options.headers,
   };
 
-  if (token) {
+  // Строгая проверка: прикрепляем токен только если он реально существует
+  if (token && token !== 'undefined' && token !== 'null') {
     headers['Authorization'] = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${BASE_URL}${endpoint}`, {
-    ...options,
-    headers,
-  });
+  const response = await fetch(`${BASE_URL}${endpoint}`, { ...options, headers });
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    let errMsg = 'Ошибка запроса к серверу';
+    let errMsg = errorData.detail || 'Ошибка сервера';
     
-    // Расшифровка ошибок FastAPI (убираем [object Object])
-    if (errorData.detail) {
-      if (typeof errorData.detail === 'string') {
-        errMsg = errorData.detail;
-      } else if (Array.isArray(errorData.detail)) {
-        // Если это ошибка валидации Pydantic (422)
-        errMsg = errorData.detail.map(err => `${err.loc[err.loc.length - 1]}: ${err.msg}`).join(' | ');
-      }
+    if (Array.isArray(errorData.detail)) {
+      errMsg = errorData.detail.map(err => `${err.loc[err.loc.length - 1]}: ${err.msg}`).join(' | ');
     }
     throw new Error(errMsg);
   }
