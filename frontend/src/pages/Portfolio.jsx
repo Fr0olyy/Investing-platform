@@ -1,18 +1,40 @@
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip } from 'recharts';
+import { useState, useEffect } from 'react';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
+import { apiClient } from '../api/client';
 
-const pieData = [
-  { name: 'Акции', value: 75 },
-  { name: 'Кэш', value: 25 },
-];
 const COLORS = ['#3B82F6', '#64748B'];
 
-const myAssets = [
-  { ticker: 'SBER', name: 'Сбербанк', count: 100, avgPrice: '250.50 ₽', currentPrice: '265.10 ₽', profit: '+1 460 ₽', isUp: true },
-  { ticker: 'GAZP', name: 'Газпром', count: 50, avgPrice: '175.20 ₽', currentPrice: '170.80 ₽', profit: '-220 ₽', isUp: false },
-  { ticker: 'AAPL', name: 'Apple Inc.', count: 5, avgPrice: '$150.00', currentPrice: '$155.30', profit: '+$26.50', isUp: true },
-];
-
 export default function Portfolio() {
+  const [summary, setSummary] = useState(null);
+  const [positions, setPositions] = useState([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    // Делаем два запроса параллельно: за сводкой и за позициями
+    Promise.all([
+      apiClient('/portfolio/summary'),
+      apiClient('/portfolio/positions')
+    ])
+    .then(([sumData, posData]) => {
+      setSummary(sumData);
+      setPositions(posData);
+      setIsLoading(false);
+    })
+    .catch(err => {
+      console.error("Ошибка загрузки портфеля:", err);
+      setIsLoading(false);
+    });
+  }, []);
+
+  if (isLoading) return <div className="page-content"><h2>Загрузка портфеля...</h2></div>;
+  if (!summary) return <div className="page-content"><h2>Ошибка доступа. Вы авторизованы?</h2></div>;
+
+  // Динамические данные для диаграммы
+  const pieData = [
+    { name: 'В активах', value: summary.invested_value || 0 },
+    { name: 'Кэш', value: summary.cash || 0 },
+  ];
+
   return (
     <div className="page-content">
       <div className="page-header">
@@ -21,13 +43,16 @@ export default function Portfolio() {
 
       <div className="portfolio-stats">
         <div className="card stat-card">
-          <p className="text-muted">Стоимость портфеля</p>
-          <h2>1 025 450 ₽</h2>
-          <p className="text-green">↗ +25 450 ₽ (2.54% сегодня)</p>
+          <p className="text-muted">Общая стоимость</p>
+          <h2>{summary.total_value?.toFixed(2)} ₽</h2>
+          <p className={summary.pnl >= 0 ? 'text-green' : 'text-red'}>
+            {summary.pnl >= 0 ? '↗ +' : '↘ '} {summary.pnl?.toFixed(2)} ₽
+          </p>
+          <p className="text-muted text-sm mt-4">Свободный кэш: {summary.cash?.toFixed(2)} ₽</p>
         </div>
         
         <div className="card chart-card-small">
-          <p className="text-muted">Структура портфеля</p>
+          <p className="text-muted">Структура</p>
           <div style={{ height: 120 }}>
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
@@ -36,7 +61,7 @@ export default function Portfolio() {
                     <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                   ))}
                 </Pie>
-                <Tooltip contentStyle={{ backgroundColor: '#0F172A', border: 'none' }} />
+                <RechartsTooltip contentStyle={{ backgroundColor: '#0F172A', border: 'none' }} />
               </PieChart>
             </ResponsiveContainer>
           </div>
@@ -45,30 +70,30 @@ export default function Portfolio() {
 
       <div className="card mt-4">
         <h3>Мои активы</h3>
-        <table className="market-table">
-          <thead>
-            <tr>
-              <th>Тикер</th>
-              <th>Название</th>
-              <th>Кол-во</th>
-              <th>Ср. цена</th>
-              <th>Тек. цена</th>
-              <th>Прибыль/Убыток</th>
-            </tr>
-          </thead>
-          <tbody>
-            {myAssets.map((asset) => (
-              <tr key={asset.ticker}>
-                <td className="ticker">{asset.ticker}</td>
-                <td>{asset.name}</td>
-                <td>{asset.count}</td>
-                <td>{asset.avgPrice}</td>
-                <td>{asset.currentPrice}</td>
-                <td className={asset.isUp ? 'text-green' : 'text-red'}>{asset.profit}</td>
+        {positions.length === 0 ? (
+          <p className="text-muted mt-4">У вас пока нет купленных активов. Перейдите в раздел "Рынок", чтобы совершить первую сделку.</p>
+        ) : (
+          <table className="market-table">
+            <thead>
+              <tr>
+                <th>Тикер</th>
+                <th>Кол-во лотов</th>
+                <th>Ср. цена покупки</th>
+                <th>Текущая цена</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {positions.map((pos) => (
+                <tr key={pos.ticker}>
+                  <td className="ticker">{pos.ticker}</td>
+                  <td>{pos.quantity}</td>
+                  <td>{pos.average_price?.toFixed(2)} ₽</td>
+                  <td>{pos.current_price?.toFixed(2)} ₽</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );

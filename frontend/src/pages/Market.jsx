@@ -1,33 +1,29 @@
 import { useState, useEffect } from 'react';
-import { fetchMarketData } from '../api/mockApi';
+import { apiClient } from '../api/client';
 
 export default function Market() {
   const [stocks, setStocks] = useState([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
-  
-  // Состояния для модального окна (БП-6)
-  const [selectedStock, setSelectedStock] = useState(null);
-  const [lotCount, setLotCount] = useState(1);
 
-  // Загрузка данных "с сервера"
   useEffect(() => {
-    fetchMarketData().then((data) => {
-      setStocks(data);
-      setIsLoading(false);
-    });
+    apiClient('/assets')
+      .then(data => {
+        // Защита от ошибки: убеждаемся, что пришел массив
+        if (Array.isArray(data)) {
+          setStocks(data);
+        } else {
+          setStocks([]);
+        }
+        setIsLoading(false);
+      })
+      .catch(err => {
+        console.error("Ошибка загрузки активов:", err);
+        setError("Не удалось загрузить данные рынка.");
+        setIsLoading(false);
+      });
   }, []);
-
-  const handleBuy = (stock) => {
-    setSelectedStock(stock);
-    setLotCount(1); // сброс лотов при новом открытии
-  };
-
-  const confirmPurchase = () => {
-    alert(`Куплено ${lotCount} акций ${selectedStock.ticker} на сумму ${(selectedStock.price * lotCount).toFixed(2)} ₽`);
-    // Здесь в будущем будет POST-запрос на бекенд
-    setSelectedStock(null);
-  };
 
   return (
     <div className="page-content">
@@ -43,15 +39,14 @@ export default function Market() {
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
         />
-        <div className="filter-tags">
-          <button className="tag active">Все</button>
-          <button className="tag">Лидеры роста</button>
-          <button className="tag">IT Сектор</button> {/* Добавлен фильтр по отрасли (БП-3) */}
-        </div>
       </div>
 
       {isLoading ? (
-        <p className="text-muted mt-4">Загрузка данных с сервера...</p>
+        <p className="mt-4 text-muted">Загрузка данных...</p>
+      ) : error ? (
+        <p className="mt-4 text-red">{error}</p>
+      ) : stocks.length === 0 ? (
+        <p className="mt-4 text-muted">Активы не найдены.</p>
       ) : (
         <table className="market-table mt-4">
           <thead>
@@ -59,56 +54,25 @@ export default function Market() {
               <th>Тикер</th>
               <th>Название</th>
               <th>Цена</th>
-              <th>Изменение</th>
               <th>Действие</th>
             </tr>
           </thead>
           <tbody>
-            {stocks.filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase())).map((stock) => (
-              <tr key={stock.id}>
+            {stocks
+              .filter(s => (s.name || '').toLowerCase().includes(searchTerm.toLowerCase()) || 
+                           (s.ticker || '').toLowerCase().includes(searchTerm.toLowerCase()))
+              .map((stock) => (
+              <tr key={stock.ticker || stock.id}>
                 <td className="ticker">{stock.ticker}</td>
                 <td>{stock.name}</td>
-                <td>{stock.price} ₽</td>
-                <td className={stock.isUp ? 'text-green' : 'text-red'}>
-                  {stock.isUp ? '+' : ''}{stock.change}%
-                </td>
+                <td>{stock.current_price || stock.price} ₽</td>
                 <td>
-                  <button className="btn-buy" onClick={() => handleBuy(stock)}>Купить</button>
+                  <button className="btn-buy" onClick={() => alert('Покупка пока в разработке')}>Купить</button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
-      )}
-
-      {/* Модальное окно покупки (БП-6) */}
-      {selectedStock && (
-        <div className="modal-overlay">
-          <div className="modal-content card">
-            <h2>Покупка {selectedStock.ticker}</h2>
-            <p className="text-muted">Текущая цена: {selectedStock.price} ₽</p>
-            
-            <div className="input-group mt-4">
-              <label>Количество лотов</label>
-              <input 
-                type="number" 
-                min="1" 
-                value={lotCount} 
-                onChange={(e) => setLotCount(Number(e.target.value))}
-              />
-            </div>
-            
-            <div className="modal-total mt-4">
-              <span>Итого:</span>
-              <h3>{(selectedStock.price * lotCount).toFixed(2)} ₽</h3>
-            </div>
-
-            <div className="modal-actions mt-4">
-              <button className="btn-secondary" onClick={() => setSelectedStock(null)}>Отмена</button>
-              <button className="btn-primary" onClick={confirmPurchase}>Подтвердить</button>
-            </div>
-          </div>
-        </div>
       )}
     </div>
   );

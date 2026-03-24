@@ -5,26 +5,27 @@ export default function Profile() {
         <h1>Настройки профиля</h1>
       </div>
 
-      <div className="card profile-form-card">
-        <form className="auth-form">
+      <div className="profile-form-card">
+        <form>
           <div className="input-group">
             <label>Имя пользователя</label>
             <input type="text" defaultValue="Иван И." />
           </div>
           <div className="input-group">
             <label>Email</label>
-            <input type="email" defaultValue="ivan@example.com" />
+            <input type="email" defaultValue="ivan@example.com" disabled />
           </div>
           <div className="input-group">
             <label>Новый пароль</label>
             <input type="password" placeholder="Введите новый пароль" />
           </div>
-          <div className="toggle-group">
-            <label>
-              <input type="checkbox" defaultChecked /> Получать email уведомления
-            </label>
+          
+          <div className="mt-4 mb-4" style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <input type="checkbox" id="notifications" defaultChecked style={{ width: '18px', height: '18px' }} /> 
+            <label htmlFor="notifications" style={{ cursor: 'pointer' }}>Получать email уведомления</label>
           </div>
-          <button type="button" className="btn-primary mt-4">Сохранить изменения</button>
+          
+          <button type="button" className="btn-primary full-width mt-4">Сохранить изменения</button>
         </form>
       </div>
     </div>
