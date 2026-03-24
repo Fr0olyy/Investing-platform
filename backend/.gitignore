@@ -1,2 +1,25 @@
-.venv
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+
+# Environment variables
 .env
+
+# Docker
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Database
+postgres_data/
+*.db
+ml/artifacts/
+ml/datasets/
+ml/experiments/
+
+# IDE
+.idea/
+.vscode/
