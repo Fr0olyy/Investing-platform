@@ -1,9 +1,13 @@
-fastapi
-uvicorn[standard]
-sqlalchemy
-asyncpg
-pydantic
-pydantic-settings
-python-jose[cryptography]  # Для работы с JWT
-passlib[bcrypt]            # Для хеширования паролей
-python-multipart           # Для формы логина в Swagger
+fastapi==0.118.0
+uvicorn[standard]==0.37.0
+sqlalchemy==2.0.43
+psycopg[binary]==3.2.10
+python-jose[cryptography]==3.5.0
+passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
+pydantic-settings==2.11.0
+python-multipart==0.0.20
+email-validator==2.3.0
+apscheduler==3.11.0
+httpx==0.28.1
+pytest==8.4.2
