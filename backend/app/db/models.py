@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 from uuid import uuid4
@@ -16,12 +16,16 @@ def generate_uuid() -> str:
     return str(uuid4())
 
 
+def utc_now_naive() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
 class TimestampMixin:
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
-        default=datetime.utcnow,
-        onupdate=datetime.utcnow,
+        default=utc_now_naive,
+        onupdate=utc_now_naive,
         nullable=False,
     )
 
@@ -107,7 +111,7 @@ class Quote(Base):
     change_percent: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     volume: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     source: Mapped[str] = mapped_column(String(50), default="mock", nullable=False)
-    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive, nullable=False, index=True)
 
     asset: Mapped[Asset] = relationship(back_populates="quotes")
 
@@ -153,7 +157,7 @@ class Trade(Base):
     quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     price: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
     total_amount: Mapped[float] = mapped_column(Numeric(18, 2), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive, nullable=False)
 
     portfolio: Mapped[Portfolio] = relationship(back_populates="trades")
     asset: Mapped[Asset] = relationship(back_populates="trades")
@@ -172,7 +176,7 @@ class Prediction(Base):
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     drivers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
     is_placeholder: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    generated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    generated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive, nullable=False, index=True)
 
     asset: Mapped[Asset] = relationship(back_populates="predictions")
 
@@ -185,7 +189,7 @@ class MacroIndicatorSnapshot(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     value: Mapped[float] = mapped_column(Numeric(18, 4), nullable=False)
     source: Mapped[str] = mapped_column(String(50), default="mock", nullable=False)
-    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive, nullable=False, index=True)
 
 
 class MLModelMetadata(TimestampMixin, Base):
@@ -216,7 +220,7 @@ class ScenarioSimulation(Base):
     impact_percent: Mapped[float] = mapped_column(Numeric(10, 2), nullable=False)
     confidence_score: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
     drivers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list, nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive, nullable=False, index=True)
 
     asset: Mapped[Asset] = relationship(back_populates="scenario_simulations")
 

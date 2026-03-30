@@ -1,69 +1,103 @@
-# Backend инвестиционной платформы
+# Backend и ML для инвестиционной платформы
 
-## Что это
+## Что это за проект
 
-Это backend на **FastAPI** для учебной инвестиционной платформы. Он рассчитан на сценарий, где пользователь:
+Это backend на **FastAPI** для учебной инвестиционной платформы, где пользователь работает не с реальными деньгами, а с виртуальным брокерским счетом, но при этом видит **настоящие рыночные данные** и может использовать **ML-модуль сценарного макро-анализа**.
 
-- регистрируется и получает виртуальный брокерский счет;
-- видит список активов и актуальные котировки;
-- смотрит свечной график и новости по активу;
-- покупает и продает инструменты по рыночной цене;
-- анализирует состояние портфеля и доходность;
-- получает кэшированные прогнозы;
-- запускает сценарный макро-анализ через подготовленный ML-контур.
+Сервис решает сразу несколько задач:
 
-Frontend при этом можно развивать независимо: API уже разделен по доменам и документирован через Swagger.
+- регистрация и аутентификация инвестора;
+- автоматическое создание виртуального портфеля;
+- получение реальных котировок компаний;
+- хранение истории свечей;
+- покупка и продажа активов;
+- расчет PnL и структуры портфеля;
+- обучение ML-моделей на исторических рядах;
+- генерация прогнозов и сценарных расчетов.
 
-## Что реализовано
+## Что уже реализовано
 
-- FastAPI-приложение с модульной структурой `api / services / db / schemas / core`.
-- Swagger UI и ReDoc с русскими описаниями endpoint-ов.
-- JWT-аутентификация.
-- Регистрация с автоматическим созданием портфеля и стартовым балансом `1 000 000 RUB`.
-- Каталог активов, последние котировки, свечи и демо-новости.
-- Операции `buy/sell` с обновлением денежных средств и позиций.
-- Сводка по портфелю: cash, invested value, total value, pnl, allocation.
-- Таблицы и endpoints под ML:
-  - `ml_model_metadata`
-  - `predictions`
-  - `scenario_simulations`
-- Фоновые задачи:
-  - обновление рыночных данных;
-  - пересчет placeholder-прогнозов.
-- Docker и `docker-compose`.
-- Smoke-тест для проверки базового сценария.
+### Backend
 
-## Быстрый старт
+- FastAPI-приложение с маршрутизацией по доменам.
+- Swagger UI и ReDoc.
+- JWT Bearer authentication.
+- SQLAlchemy ORM и автоматическое создание схемы БД.
+- Каталог активов MOEX.
+- Реальные котировки и исторические свечи.
+- Портфель, позиции, сделки, история операций.
+- Healthcheck и системные endpoint-ы для синхронизации рынка и ML.
 
-### 1. Локальный запуск
+### ML
 
-```powershell
-cd backend
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-copy .env.example .env
-uvicorn app.main:app --reload
+- Сбор реальных данных по активу и макрофакторам.
+- Построение обучающего датасета.
+- Обучение линейной регрессии для каждого тикера.
+- Сохранение артефактов модели через `joblib`.
+- Сохранение метрик качества и коэффициентов модели в БД.
+- Кэширование прогнозов.
+- Сценарный расчет по пользовательским макрофакторам.
+- Driver analysis на основе линейных вкладов факторов.
+
+## Реальные API, которые используются
+
+### 1. MOEX ISS
+
+Используется для российских акций и индексов.
+
+Текущее состояние актива:
+
+```text
+https://iss.moex.com/iss/engines/stock/markets/shares/boards/TQBR/securities/{TICKER}.json
 ```
 
-После запуска:
+История актива:
 
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
-- Healthcheck: `http://localhost:8000/api/v1/system/health`
-
-### 2. Запуск через Docker
-
-```powershell
-cd backend
-copy .env.example .env
-docker compose up --build
+```text
+https://iss.moex.com/iss/history/engines/stock/markets/shares/boards/TQBR/securities/{TICKER}.json
 ```
 
-Поднимутся:
+Текущее состояние индекса:
 
-- `db` — PostgreSQL
-- `backend` — FastAPI-сервис
+```text
+https://iss.moex.com/iss/engines/stock/markets/index/securities/{SECID}.json
+```
+
+История индекса:
+
+```text
+https://iss.moex.com/iss/history/engines/stock/markets/index/securities/{SECID}.json
+```
+
+### 2. Банк России
+
+Используется для курса USD/RUB и ключевой ставки.
+
+Текущий курс:
+
+```text
+https://www.cbr.ru/scripts/XML_daily.asp
+```
+
+Исторический курс:
+
+```text
+https://www.cbr.ru/scripts/XML_dynamic.asp
+```
+
+История ключевой ставки:
+
+```text
+https://www.cbr.ru/eng/hd_base/KeyRate/
+```
+
+### 3. FRED
+
+Используется для открытого ряда Brent:
+
+```text
+https://fred.stlouisfed.org/graph/fredgraph.csv?id=DCOILBRENTEU
+```
 
 ## Структура проекта
 
@@ -81,12 +115,24 @@ backend/
       database.py
       models.py
       seed.py
+    integrations/
+      market_data_client.py
     schemas/
     services/
+      auth_service.py
+      market_service.py
+      portfolio_service.py
+      trade_service.py
+      ml_service.py
+      bootstrap_service.py
     main.py
   docs/
     API_RU.md
     DEVELOPMENT.md
+    TEAM_GUIDE_RU.md
+    BACKEND_RU.md
+    ML_RU.md
+    MARKET_DATA_RU.md
   ml/
     artifacts/
     datasets/
@@ -97,78 +143,38 @@ backend/
   requirements.txt
 ```
 
-## Архитектура
+## Быстрый старт
 
-### `app/main.py`
+### Локально
 
-Точка входа. Создает FastAPI-приложение, подключает CORS, lifespan и все маршруты.
+```powershell
+cd backend
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+copy .env.example .env
+uvicorn app.main:app --reload
+```
 
-### `app/api`
+### Через Docker
 
-HTTP-слой:
+```powershell
+cd backend
+copy .env.example .env
+docker compose up --build
+```
 
-- принимает запросы;
-- валидирует входные данные через Pydantic;
-- отдает ответы;
-- держит Swagger/OpenAPI описание.
+## Документация API
 
-### `app/services`
+- Swagger UI: `http://localhost:8000/docs`
+- ReDoc: `http://localhost:8000/redoc`
 
-Бизнес-логика:
+Swagger русифицирован:
 
-- `auth_service.py` — регистрация, вход, JWT;
-- `market_service.py` — активы, котировки, свечи, новости;
-- `portfolio_service.py` — расчет состояния портфеля;
-- `trade_service.py` — покупка/продажа;
-- `ml_service.py` — placeholder-прогнозы и сценарный анализ;
-- `bootstrap_service.py` — старт приложения, seed и фоновые джобы.
-
-### `app/db`
-
-- `database.py` — подключение к БД;
-- `models.py` — ORM-модели;
-- `seed.py` — стартовые активы, котировки, макроиндикаторы, placeholder-модели.
-
-### `app/schemas`
-
-Pydantic-схемы запросов и ответов для API и Swagger.
-
-## Основные бизнес-сценарии
-
-### Регистрация и онбординг
-
-1. Пользователь вызывает `POST /api/v1/auth/register`.
-2. Backend создает запись в `users`.
-3. Backend автоматически создает запись в `portfolios`.
-4. На счет начисляется стартовый баланс.
-5. Пользователь получает JWT-токен.
-
-### Покупка актива
-
-1. Пользователь берет актив из `GET /api/v1/assets`.
-2. Вызывает `POST /api/v1/trades/buy`.
-3. Backend проверяет наличие средств.
-4. Создает сделку и обновляет позицию.
-5. Деньги списываются с виртуального счета.
-
-### Продажа актива
-
-1. Пользователь вызывает `POST /api/v1/trades/sell`.
-2. Backend проверяет количество в открытой позиции.
-3. Обновляет или удаляет позицию.
-4. Начисляет деньги на счет.
-
-### Сценарный ML-анализ
-
-1. Пользователь отправляет тикер и макрофакторы в `POST /api/v1/ml/scenario`.
-2. Backend берет `ml_model_metadata`.
-3. Считает сценарную цену через placeholder-логику.
-4. Возвращает `predicted_price`, `impact_percent`, `drivers`.
-
-Важно:
-
-- Сейчас здесь **placeholder-реализация**, чтобы вы могли потом вставить свою ML-модель.
-- Контракт API и таблицы уже готовы.
+- русские названия разделов;
+- русские `summary` и `description`;
+- примеры тел запросов для ключевых методов;
+- описания полей в Pydantic-схемах.
 
 ## Основные endpoint-ы
 
@@ -207,67 +213,76 @@ Pydantic-схемы запросов и ответов для API и Swagger.
 
 - `GET /api/v1/system/health`
 - `POST /api/v1/system/market/refresh`
+- `POST /api/v1/system/ml/train`
 - `POST /api/v1/system/ml/refresh`
 
-## База данных
+## Как работает backend
 
-Ключевые таблицы:
+### При старте приложения
 
-- `users`
-- `portfolios`
-- `positions`
-- `trades`
-- `assets`
-- `quotes`
-- `candles`
-- `news_articles`
-- `macro_indicator_snapshots`
-- `ml_model_metadata`
-- `predictions`
-- `scenario_simulations`
+1. Инициализируется база данных.
+2. Создаются seed-активы, если база пустая.
+3. Выполняется синхронизация рынка:
+   - текущие котировки;
+   - дневные свечи;
+   - макроиндикаторы.
+4. Если включено `ML_AUTO_TRAIN_ON_STARTUP=true`, происходит обучение моделей.
+5. Формируется кэш прогнозов.
 
-Схема создается автоматически через ORM при старте приложения.
+### При покупке актива
 
-## ML-контур
+1. Пользователь отправляет тикер и количество.
+2. Backend берет последнюю рыночную цену.
+3. Проверяет достаточность виртуальных средств.
+4. Создает сделку.
+5. Обновляет cash balance и позицию.
 
-Сделано специально так, чтобы вы могли потом подключить свою ML-часть без перелома API.
+### При сценарном анализе
 
-Что уже подготовлено:
+1. Пользователь задает новые значения макрофакторов.
+2. Backend берет текущую модель по тикеру.
+3. В модель подается:
+   - текущая цена актива как `PREV_CLOSE`;
+   - пользовательские макрофакторы.
+4. Возвращается сценарная цена, impact и drivers.
 
-- место под артефакты: `ml/artifacts/`
-- место под датасеты: `ml/datasets/`
-- место под исследования: `ml/experiments/`
-- таблица метаданных модели;
-- таблица кэшированных прогнозов;
-- таблица пользовательских сценарных расчетов;
-- endpoint-ы для выдачи прогноза и сценарного расчета.
+## Как работает ML
 
-Что можно заменить позже:
+Модель обучается отдельно для каждого тикера.
 
-- `app/services/ml_service.py`
-- seed-параметры для placeholder-моделей;
-- фоновые джобы переобучения.
+### Входные признаки
 
-## Swagger и документация API
+- `PREV_CLOSE`
+- `BRENT`
+- `USD_RUB`
+- `IMOEX`
+- `KEY_RATE`
+- `RGBI`
 
-Документация уже доступна в приложении:
+### Целевая переменная
 
-- `/docs` — Swagger UI
-- `/redoc` — ReDoc
+- цена закрытия актива на следующий торговый день.
 
-Что добавлено для команды:
+### Алгоритм
 
-- русские описания разделов;
-- русские описания endpoint-ов;
-- поясняющие summary;
-- примеры тел запросов для ключевых методов.
+- `LinearRegression` из `scikit-learn`.
 
-## Разработка
+### Почему выбран именно этот базовый вариант
 
-Подробная документация по разработке лежит здесь:
+- легко объяснить команде;
+- быстро обучается;
+- хорошо подходит как baseline;
+- позволяет интерпретировать влияние факторов через коэффициенты;
+- не требует сложной инфраструктуры.
 
-- [API_RU.md](./docs/API_RU.md)
-- [DEVELOPMENT.md](./docs/DEVELOPMENT.md)
+### Что сохраняется после обучения
+
+- сериализованный `.joblib`-артефакт;
+- метрики `r2`, `mae`, `rmse`;
+- коэффициенты модели;
+- baseline-средние признаков;
+- обучающее окно;
+- датасет в `ml/datasets/`.
 
 ## Тестирование
 
@@ -277,12 +292,23 @@ Smoke-тест:
 .venv\Scripts\python -m pytest tests\test_api_smoke.py
 ```
 
-Проверяется:
+Проверка синтаксиса:
 
-- подъем приложения;
-- healthcheck;
-- регистрация;
-- получение токена;
-- чтение профиля;
-- чтение списка активов.
+```powershell
+.venv\Scripts\python -m compileall app
+```
 
+## Подробная документация для команды
+
+- [TEAM_GUIDE_RU.md](./docs/TEAM_GUIDE_RU.md)
+- [BACKEND_RU.md](./docs/BACKEND_RU.md)
+- [ML_RU.md](./docs/ML_RU.md)
+- [MARKET_DATA_RU.md](./docs/MARKET_DATA_RU.md)
+- [API_RU.md](./docs/API_RU.md)
+- [DEVELOPMENT.md](./docs/DEVELOPMENT.md)
+
+## Что еще важно
+
+- Новости пока остаются demo-заглушкой.
+- Котировки и макрофакторы уже реальные.
+- Если внешний API недоступен, backend старается не падать и использует fallback-данные, чтобы приложение оставалось рабочим.
