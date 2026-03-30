@@ -35,25 +35,39 @@ def healthcheck(db: Session = Depends(get_db)) -> HealthResponse:
     "/market/refresh",
     response_model=BackgroundRefreshResponse,
     summary="Ручное обновление рынка",
-    description="Принудительно обновляет котировки и дневные свечи. Удобно для локальной разработки.",
+    description="Синхронизирует реальные котировки, дневные свечи и макроиндикаторы. При недоступности внешних API падает на fallback-режим.",
 )
 def refresh_market_data(db: Session = Depends(get_db)) -> BackgroundRefreshResponse:
     quotes_updated = MarketService.refresh_market_snapshot(db, source="manual-refresh")
     return BackgroundRefreshResponse(
-        message="Market data refreshed.",
+        message="Рыночные данные обновлены.",
         affected_records=quotes_updated,
+    )
+
+
+@router.post(
+    "/ml/train",
+    response_model=BackgroundRefreshResponse,
+    summary="Обучение ML-моделей",
+    description="Собирает реальные исторические ряды, обучает линейные модели по каждому активу и сохраняет артефакты на диск.",
+)
+def train_models(db: Session = Depends(get_db)) -> BackgroundRefreshResponse:
+    trained_models = MLService.train_models(db)
+    return BackgroundRefreshResponse(
+        message="ML-модели обучены.",
+        affected_records=trained_models,
     )
 
 
 @router.post(
     "/ml/refresh",
     response_model=BackgroundRefreshResponse,
-    summary="Ручной пересчет прогнозов",
-    description="Пересчитывает кэш прогнозов на основе текущих placeholder-параметров модели.",
+    summary="Пересчет прогнозов",
+    description="Использует обученные модели и актуальные макрофакторы для обновления кэша прогнозов.",
 )
 def refresh_ml_predictions(db: Session = Depends(get_db)) -> BackgroundRefreshResponse:
     predictions_updated = MLService.refresh_predictions(db)
     return BackgroundRefreshResponse(
-        message="Placeholder ML predictions refreshed.",
+        message="Кэш прогнозов обновлен.",
         affected_records=predictions_updated,
     )

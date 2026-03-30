@@ -16,6 +16,9 @@ def initialize_application() -> None:
     init_db()
     with SessionLocal() as db:
         seed_reference_data(db)
+        MarketService.refresh_market_snapshot(db, source="startup")
+        if settings.ML_AUTO_TRAIN_ON_STARTUP:
+            MLService.train_models(db)
         MLService.refresh_predictions(db)
 
 
@@ -48,4 +51,5 @@ def run_market_refresh_job() -> None:
 
 def run_ml_refresh_job() -> None:
     with SessionLocal() as db:
+        MLService.train_models(db)
         MLService.refresh_predictions(db)

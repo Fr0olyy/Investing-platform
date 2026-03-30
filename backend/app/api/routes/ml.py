@@ -23,7 +23,7 @@ def get_prediction(ticker: str, db: Session = Depends(get_db)) -> PredictionResp
     "/models/{ticker}",
     response_model=ModelMetadataResponse,
     summary="Метаданные ML-модели",
-    description="Возвращает информацию о подготовленной модели и месте хранения артефактов.",
+    description="Возвращает информацию об обученной модели, коэффициентах, метриках и артефактах.",
 )
 def get_model_metadata(ticker: str, db: Session = Depends(get_db)) -> ModelMetadataResponse:
     return MLService.get_model_metadata(db, ticker)

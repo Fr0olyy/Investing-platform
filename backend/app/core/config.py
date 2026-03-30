@@ -27,8 +27,20 @@ class Settings(BaseSettings):
     QUOTE_REFRESH_MINUTES: int = 30
     ML_REFRESH_HOURS: int = 12
 
-    MARKET_DATA_PROVIDER: str = "mock"
+    MARKET_DATA_PROVIDER: str = "real"
     ML_ARTIFACTS_DIR: str = "./ml/artifacts"
+    ML_DATASETS_DIR: str = "./ml/datasets"
+    ML_EXPERIMENTS_DIR: str = "./ml/experiments"
+    ML_MODEL_TYPE: str = "linear_regression"
+    ML_LOOKBACK_YEARS: int = 3
+    ML_TEST_RATIO: float = 0.2
+    ML_MIN_DATA_POINTS: int = 120
+    ML_HORIZON_DAYS: int = 1
+    ML_AUTO_TRAIN_ON_STARTUP: bool = True
+
+    MOEX_BASE_URL: str = "https://iss.moex.com/iss"
+    CBR_BASE_URL: str = "https://www.cbr.ru"
+    FRED_BRENT_CSV_URL: str = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DCOILBRENTEU"
 
     model_config = SettingsConfigDict(
         env_file=".env",
