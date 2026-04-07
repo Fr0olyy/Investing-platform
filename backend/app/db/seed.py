@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from random import Random
 
@@ -31,6 +31,10 @@ MACRO_SEEDS = [
 
 def _money(value: Decimal) -> Decimal:
     return value.quantize(Decimal("0.01"))
+
+
+def utc_now_naive() -> datetime:
+    return datetime.now(UTC).replace(tzinfo=None)
 
 
 def _build_placeholder_model(asset: Asset) -> MLModelMetadata:
@@ -95,7 +99,7 @@ def seed_reference_data(db: Session) -> None:
             rng = Random(asset.ticker)
             current_close = price
             for day_offset in range(45, 0, -1):
-                candle_time = datetime.utcnow() - timedelta(days=day_offset)
+                candle_time = utc_now_naive() - timedelta(days=day_offset)
                 drift = Decimal(str(rng.uniform(-0.025, 0.03)))
                 next_close = _money(current_close * (Decimal("1.00") + drift))
                 db.add(
@@ -126,7 +130,7 @@ def seed_reference_data(db: Session) -> None:
                     url=f"https://example.com/news/{asset.ticker.lower()}",
                     source="Demo Feed",
                     sentiment="neutral",
-                    published_at=datetime.utcnow() - timedelta(hours=2),
+                    published_at=utc_now_naive() - timedelta(hours=2),
                 )
             )
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
 from random import uniform
 
@@ -8,7 +8,9 @@ from fastapi import HTTPException, status
 from sqlalchemy import desc, select
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.db.models import Asset, Candle, MacroIndicatorSnapshot, NewsArticle, Prediction, Quote
+from app.integrations.market_data_client import ExternalDataError, MarketDataClient
 from app.schemas.asset import AssetDetailsResponse, AssetListItem, CandleResponse, NewsArticleResponse, QuoteSnapshot
 from app.schemas.ml import DriverContribution, PredictionResponse
 
@@ -83,7 +85,7 @@ class MarketService:
     @staticmethod
     def get_candles(db: Session, ticker: str, days: int) -> list[CandleResponse]:
         asset = MarketService.get_asset_or_404(db, ticker)
-        from_date = datetime.utcnow() - timedelta(days=days)
+        from_date = datetime.now() - timedelta(days=days)
         candles = db.scalars(
             select(Candle)
             .where(Candle.asset_id == asset.id, Candle.timestamp >= from_date)
@@ -104,6 +106,115 @@ class MarketService:
 
     @staticmethod
     def refresh_market_snapshot(db: Session, source: str = "scheduler") -> int:
+        if settings.MARKET_DATA_PROVIDER.lower() == "mock":
+            return MarketService._refresh_market_snapshot_mock(db, source)
+
+        try:
+            with MarketDataClient() as client:
+                return MarketService._refresh_market_snapshot_real(db, client, source)
+        except ExternalDataError:
+            db.rollback()
+            return MarketService._refresh_market_snapshot_mock(db, f"{source}-fallback")
+        except Exception:
+            db.rollback()
+            return MarketService._refresh_market_snapshot_mock(db, f"{source}-fallback")
+
+    @staticmethod
+    def get_latest_macro_values(db: Session) -> dict[str, float]:
+        values: dict[str, float] = {}
+        for code in ("BRENT", "USD_RUB", "IMOEX", "KEY_RATE", "RGBI"):
+            snapshot = db.scalar(
+                select(MacroIndicatorSnapshot)
+                .where(MacroIndicatorSnapshot.code == code)
+                .order_by(desc(MacroIndicatorSnapshot.recorded_at))
+                .limit(1)
+            )
+            if snapshot:
+                values[code] = float(snapshot.value)
+        return values
+
+    @staticmethod
+    def _refresh_market_snapshot_real(db: Session, client: MarketDataClient, source: str) -> int:
+        assets = db.scalars(select(Asset).where(Asset.is_active.is_(True)).order_by(Asset.ticker)).all()
+        updated = 0
+        history_start = date.today() - timedelta(days=365)
+        history_end = date.today()
+
+        for asset in assets:
+            snapshot = client.fetch_share_snapshot(asset.ticker, board=asset.board)
+            asset.name = snapshot["name"] or asset.name
+            asset.lot_size = snapshot["lot_size"] or asset.lot_size
+
+            db.add(
+                Quote(
+                    asset_id=asset.id,
+                    price=money(snapshot["price"]),
+                    open=money(snapshot["open"]),
+                    high=money(snapshot["high"]),
+                    low=money(snapshot["low"]),
+                    close=money(snapshot["close"]),
+                    prev_close=money(snapshot["prev_close"]),
+                    change_percent=money(snapshot["change_percent"]),
+                    volume=int(snapshot["volume"]),
+                    source=snapshot["source"],
+                    recorded_at=snapshot["recorded_at"],
+                )
+            )
+
+            history_frame = client.fetch_share_history(asset.ticker, history_start, history_end, board=asset.board)
+            MarketService._upsert_candles_from_frame(db, asset.id, history_frame)
+            updated += 1
+
+        for macro_snapshot in client.fetch_current_macro_snapshot():
+            db.add(
+                MacroIndicatorSnapshot(
+                    code=macro_snapshot.code,
+                    name=macro_snapshot.name,
+                    value=macro_snapshot.value,
+                    source=macro_snapshot.source,
+                    recorded_at=macro_snapshot.recorded_at,
+                )
+            )
+
+        db.commit()
+        return updated
+
+    @staticmethod
+    def _upsert_candles_from_frame(db: Session, asset_id: str, frame) -> None:
+        existing = {
+            candle.timestamp.date(): candle
+            for candle in db.scalars(
+                select(Candle).where(
+                    Candle.asset_id == asset_id,
+                    Candle.interval == "1d",
+                )
+            ).all()
+        }
+        for row in frame.itertuples(index=False):
+            candle_ts = row.date.to_pydatetime().replace(hour=0, minute=0, second=0, microsecond=0)
+            candle = existing.get(candle_ts.date())
+            if candle:
+                candle.open = money(row.open)
+                candle.high = money(row.high)
+                candle.low = money(row.low)
+                candle.close = money(row.close)
+                candle.volume = int(row.volume or 0)
+            else:
+                db.add(
+                    Candle(
+                        asset_id=asset_id,
+                        interval="1d",
+                        open=money(row.open),
+                        high=money(row.high),
+                        low=money(row.low),
+                        close=money(row.close),
+                        volume=int(row.volume or 0),
+                        timestamp=candle_ts,
+                    )
+                )
+
+    @staticmethod
+    def _refresh_market_snapshot_mock(db: Session, source: str) -> int:
         assets = db.scalars(select(Asset).where(Asset.is_active.is_(True))).all()
         updated = 0
         for asset in assets:
@@ -128,7 +239,7 @@ class MarketService:
                     source=source,
                 )
             )
-            today = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
             candle = db.scalar(
                 select(Candle)
                 .where(Candle.asset_id == asset.id, Candle.interval == "1d", Candle.timestamp == today)

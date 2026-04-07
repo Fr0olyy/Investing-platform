@@ -10,6 +10,8 @@ if TEST_DB.exists():
 
 os.environ["DATABASE_URL"] = "sqlite:///./test_api_smoke.db"
 os.environ["ENABLE_BACKGROUND_JOBS"] = "false"
+os.environ["MARKET_DATA_PROVIDER"] = "mock"
+os.environ["ML_AUTO_TRAIN_ON_STARTUP"] = "false"
 
 from app.main import app  # noqa: E402
 
