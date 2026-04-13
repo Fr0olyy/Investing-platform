@@ -14,24 +14,38 @@ export default function Register() {
     setIsLoading(true);
     
     try {
-      // 1. Регистрация
+      // 1. Создаем пользователя
       await apiClient('/auth/register', {
         method: 'POST',
         body: JSON.stringify(formData)
       });
 
       // 2. Сразу логинимся
-      const loginData = await apiClient('/auth/login', {
+      const data = await apiClient('/auth/login', {
         method: 'POST',
         body: JSON.stringify(formData)
       });
       
-      const actualToken = loginData.access_token || loginData.token;
-      if (!actualToken) {
-        throw new Error("Сервер не прислал токен! Ответ: " + JSON.stringify(loginData));
+      console.log("📦 ПОЛНЫЙ ОТВЕТ СЕРВЕРА ПРИ РЕГИСТРАЦИИ:", data);
+
+      // Супер-экстрактор
+      let token = null;
+      if (typeof data === 'string') {
+          token = data;
+      } else {
+          const possibleToken = data?.access_token || data?.token || data?.jwt;
+          if (typeof possibleToken === 'string') {
+              token = possibleToken;
+          } else if (typeof possibleToken === 'object' && possibleToken !== null) {
+              token = possibleToken.access_token || possibleToken.token;
+          }
       }
 
-      localStorage.setItem('token', actualToken);
+      if (!token || typeof token !== 'string') {
+        throw new Error("Токен имеет неизвестный формат! Откройте консоль (F12).");
+      }
+
+      localStorage.setItem('token', token);
       navigate('/'); 
       
     } catch (err) {
@@ -47,7 +61,7 @@ export default function Register() {
         <h2 style={{textAlign: 'center', marginBottom: '24px', marginTop: 0}}>Создать аккаунт</h2>
         
         {error && (
-          <div style={{backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', padding: '12px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #EF4444', textAlign: 'center'}}>
+          <div style={{backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', padding: '12px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #EF4444', textAlign: 'center', wordBreak: 'break-all'}}>
             {error}
           </div>
         )}

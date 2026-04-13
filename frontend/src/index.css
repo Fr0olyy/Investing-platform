@@ -209,3 +209,22 @@ body {
 }
 
 .btn-sidebar-login:hover { background-color: #2563EB; }
+
+
+
+/* Переопределение переменных для светлой темы */
+body.light-theme {
+  --bg-main: #F3F4F6;
+  --bg-sidebar: #FFFFFF;
+  --bg-card: #FFFFFF;
+  --text-main: #111827;
+  --text-muted: #6B7280;
+}
+
+/* Делаем границы инпутов и разделителей светлее в новой теме */
+body.light-theme input {
+  border-color: #D1D5DB !important;
+}
+body.light-theme .profile-divider {
+  border-top-color: #E5E7EB !important;
+}

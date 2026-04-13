@@ -20,14 +20,26 @@ export default function Login() {
         body: JSON.stringify({ email, password })
       });
 
-      // Умный поиск токена (FastAPI может вернуть его по-разному)
-      const actualToken = data.access_token || data.token;
-      
-      if (!actualToken) {
-        throw new Error("Сервер не прислал токен! Ответ: " + JSON.stringify(data));
+      console.log("📦 ПОЛНЫЙ ОТВЕТ СЕРВЕРА ПРИ ВХОДЕ:", data);
+
+      // Супер-экстрактор токена (ищет даже внутри объектов-матрешек)
+      let token = null;
+      if (typeof data === 'string') {
+          token = data;
+      } else {
+          const possibleToken = data?.access_token || data?.token || data?.jwt;
+          if (typeof possibleToken === 'string') {
+              token = possibleToken; // Токен оказался обычной строкой
+          } else if (typeof possibleToken === 'object' && possibleToken !== null) {
+              token = possibleToken.access_token || possibleToken.token; // Достаем из матрешки
+          }
       }
 
-      localStorage.setItem('token', actualToken);
+      if (!token || typeof token !== 'string') {
+        throw new Error("Токен имеет неизвестный формат! Откройте консоль (F12) и посмотрите 'ПОЛНЫЙ ОТВЕТ СЕРВЕРА'.");
+      }
+
+      localStorage.setItem('token', token);
       navigate('/'); 
     } catch (err) {
       setError(err.message);
@@ -42,7 +54,7 @@ export default function Login() {
         <h2 style={{textAlign: 'center', marginBottom: '24px', marginTop: 0}}>Вход в платформу</h2>
         
         {error && (
-          <div style={{backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', padding: '12px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #EF4444', textAlign: 'center'}}>
+          <div style={{backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', padding: '12px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #EF4444', textAlign: 'center', wordBreak: 'break-all'}}>
             {error}
           </div>
         )}
