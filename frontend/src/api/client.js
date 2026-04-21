@@ -1,44 +1,190 @@
-const BASE_URL = 'http://127.0.0.1:8000/api/v1';
+﻿const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000/api/v1";
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL).replace(/\/+$/, "");
+const TOKEN_KEY = "token";
+
+const sanitizeToken = (token) => {
+  if (!token || typeof token !== "string") return null;
+  const cleaned = token.replace(/^["']|["']$/g, "").trim();
+  if (!cleaned || cleaned === "undefined" || cleaned === "null" || cleaned === "[object Object]") {
+    return null;
+  }
+  return cleaned;
+};
+
+const parseResponseBody = async (response) => {
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    return response.json();
+  }
+  const text = await response.text();
+  return text ? { detail: text } : null;
+};
+
+const extractErrorMessage = (status, payload) => {
+  const fallback = `Ошибка сервера (${status})`;
+  if (!payload) return fallback;
+  if (typeof payload === "string") return payload;
+  if (typeof payload.detail === "string") return payload.detail;
+  if (Array.isArray(payload.detail)) {
+    return payload.detail.map((item) => `${item.loc?.[item.loc.length - 1] || "field"}: ${item.msg}`).join(" | ");
+  }
+  if (payload.message) return payload.message;
+  return fallback;
+};
+
+const extractTokenFromAuthPayload = (payload) => {
+  return sanitizeToken(
+    payload?.token?.access_token || payload?.access_token || payload?.token || payload?.jwt || null,
+  );
+};
+
+export const authStorage = {
+  getToken() {
+    return sanitizeToken(localStorage.getItem(TOKEN_KEY));
+  },
+  setToken(token) {
+    const normalized = sanitizeToken(token);
+    if (normalized) localStorage.setItem(TOKEN_KEY, normalized);
+  },
+  clearToken() {
+    localStorage.removeItem(TOKEN_KEY);
+  },
+};
 
 export const apiClient = async (endpoint, options = {}) => {
-  let token = localStorage.getItem('token');
-
-  // Супер-очистка: удаляем случайные кавычки в начале и конце, если они есть
-  if (token) {
-    token = token.replace(/^["']|["']$/g, '');
-  }
-
-  // Выводим в консоль браузера (F12) процесс для отладки
-  console.log(`🚀 Запрос на: ${endpoint}`);
-  console.log(`🔑 Прикрепленный токен:`, token ? `${token.substring(0, 15)}...` : 'ОТСУТСТВУЕТ');
+  const {
+    method = "GET",
+    body,
+    headers: customHeaders = {},
+    auth = true,
+    signal,
+  } = options;
 
   const headers = {
-    'Content-Type': 'application/json',
-    ...options.headers,
+    Accept: "application/json",
+    ...customHeaders,
   };
 
-  // Строго защищаем от отправки мусора
-  if (token && token !== 'undefined' && token !== 'null' && token !== '[object Object]') {
-    headers['Authorization'] = `Bearer ${token}`;
+  const token = authStorage.getToken();
+  if (auth && token) {
+    headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${BASE_URL}${endpoint}`, { ...options, headers });
+  const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
+  if (body !== undefined && !isFormData && !headers["Content-Type"]) {
+    headers["Content-Type"] = "application/json";
+  }
 
+  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+    method,
+    headers,
+    body: body !== undefined && !isFormData && typeof body !== "string" ? JSON.stringify(body) : body,
+    signal,
+  });
+
+  const payload = await parseResponseBody(response);
   if (!response.ok) {
-    let errMsg = `Ошибка сервера (${response.status})`;
-    try {
-      const errorData = await response.json();
-      console.error(`❌ Ошибка от бэкенда:`, errorData); // Покажет точную причину в консоли
-      if (errorData.detail) {
-        if (typeof errorData.detail === 'string') errMsg = errorData.detail;
-        else if (Array.isArray(errorData.detail)) errMsg = errorData.detail.map(e => `${e.loc[e.loc.length - 1]}: ${e.msg}`).join(' | ');
-        else errMsg = JSON.stringify(errorData.detail);
-      }
-    } catch (e) {
-      // Игнорируем ошибки парсинга
+    if (response.status === 401 || response.status === 403) {
+      authStorage.clearToken();
     }
-    throw new Error(errMsg);
+    throw new Error(extractErrorMessage(response.status, payload));
   }
 
-  return response.json();
+  return payload;
+};
+
+export const api = {
+  auth: {
+    async register(credentials) {
+      const payload = await apiClient("/auth/register", { method: "POST", body: credentials, auth: false });
+      const token = extractTokenFromAuthPayload(payload);
+      if (!token) throw new Error("Не удалось получить токен после регистрации.");
+      authStorage.setToken(token);
+      return payload.user;
+    },
+    async login(credentials) {
+      const payload = await apiClient("/auth/login", { method: "POST", body: credentials, auth: false });
+      const token = extractTokenFromAuthPayload(payload);
+      if (!token) throw new Error("Не удалось получить токен после входа.");
+      authStorage.setToken(token);
+      return payload.user;
+    },
+    me() {
+      return apiClient("/auth/me");
+    },
+    token(credentials) {
+      const params = new URLSearchParams();
+      params.set("username", credentials.email);
+      params.set("password", credentials.password);
+      return apiClient("/auth/token", {
+        method: "POST",
+        body: params.toString(),
+        auth: false,
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+      });
+    },
+    logout() {
+      authStorage.clearToken();
+    },
+  },
+  assets: {
+    list() {
+      return apiClient("/assets", { auth: false });
+    },
+    details(ticker) {
+      return apiClient(`/assets/${ticker}`, { auth: false });
+    },
+    candles(ticker, days = 30) {
+      return apiClient(`/assets/${ticker}/candles?days=${days}`, { auth: false });
+    },
+    news(ticker, limit = 5) {
+      return apiClient(`/assets/${ticker}/news?limit=${limit}`, { auth: false });
+    },
+  },
+  portfolio: {
+    summary() {
+      return apiClient("/portfolio/summary");
+    },
+    positions() {
+      return apiClient("/portfolio/positions");
+    },
+  },
+  trades: {
+    buy(payload) {
+      return apiClient("/trades/buy", { method: "POST", body: payload });
+    },
+    sell(payload) {
+      return apiClient("/trades/sell", { method: "POST", body: payload });
+    },
+    history() {
+      return apiClient("/trades/history");
+    },
+  },
+  ml: {
+    prediction(ticker) {
+      return apiClient(`/ml/predictions/${ticker}`, { auth: false });
+    },
+    model(ticker) {
+      return apiClient(`/ml/models/${ticker}`, { auth: false });
+    },
+    scenario(payload) {
+      return apiClient("/ml/scenario", { method: "POST", body: payload, auth: false });
+    },
+  },
+  system: {
+    health() {
+      return apiClient("/system/health", { auth: false });
+    },
+    refreshMarket() {
+      return apiClient("/system/market/refresh", { method: "POST", auth: false });
+    },
+    trainModels() {
+      return apiClient("/system/ml/train", { method: "POST", auth: false });
+    },
+    refreshPredictions() {
+      return apiClient("/system/ml/refresh", { method: "POST", auth: false });
+    },
+  },
 };

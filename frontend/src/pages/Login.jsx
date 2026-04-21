@@ -1,46 +1,25 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { apiClient } from '../api/client';
+﻿import { useState } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { api } from "../api/client";
 
 export default function Login() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
+  const location = useLocation();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  const handleLogin = async (e) => {
-    e.preventDefault();
-    setError('');
+  const from = location.state?.from || "/";
+
+  const handleLogin = async (event) => {
+    event.preventDefault();
+    setError("");
     setIsLoading(true);
 
     try {
-      const data = await apiClient('/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ email, password })
-      });
-
-      console.log("📦 ПОЛНЫЙ ОТВЕТ СЕРВЕРА ПРИ ВХОДЕ:", data);
-
-      // Супер-экстрактор токена (ищет даже внутри объектов-матрешек)
-      let token = null;
-      if (typeof data === 'string') {
-          token = data;
-      } else {
-          const possibleToken = data?.access_token || data?.token || data?.jwt;
-          if (typeof possibleToken === 'string') {
-              token = possibleToken; // Токен оказался обычной строкой
-          } else if (typeof possibleToken === 'object' && possibleToken !== null) {
-              token = possibleToken.access_token || possibleToken.token; // Достаем из матрешки
-          }
-      }
-
-      if (!token || typeof token !== 'string') {
-        throw new Error("Токен имеет неизвестный формат! Откройте консоль (F12) и посмотрите 'ПОЛНЫЙ ОТВЕТ СЕРВЕРА'.");
-      }
-
-      localStorage.setItem('token', token);
-      navigate('/'); 
+      await api.auth.login({ email, password });
+      navigate(from, { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -49,31 +28,43 @@ export default function Login() {
   };
 
   return (
-    <div className="auth-container" style={{display: 'flex', alignItems: 'center', justifyContent: 'center', minHeight: '100vh'}}>
-      <div className="auth-card" style={{backgroundColor: '#1E293B', padding: '40px', borderRadius: '12px', width: '100%', maxWidth: '400px', boxShadow: '0 10px 25px rgba(0,0,0,0.5)'}}>
-        <h2 style={{textAlign: 'center', marginBottom: '24px', marginTop: 0}}>Вход в платформу</h2>
-        
-        {error && (
-          <div style={{backgroundColor: 'rgba(239, 68, 68, 0.1)', color: '#EF4444', padding: '12px', borderRadius: '8px', marginBottom: '20px', border: '1px solid #EF4444', textAlign: 'center', wordBreak: 'break-all'}}>
-            {error}
-          </div>
-        )}
+    <div className="auth-container">
+      <div className="auth-card">
+        <h2>Вход в платформу</h2>
+
+        {error && <div className="error-message">{error}</div>}
 
         <form onSubmit={handleLogin}>
-          <div style={{marginBottom: '20px'}}>
-            <label style={{color: '#94A3B8', fontSize: '0.9rem'}}>Email</label>
-            <input type="email" required value={email} onChange={e => setEmail(e.target.value)} style={{width: '100%', padding: '12px', marginTop: '8px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0F172A', color: 'white', boxSizing: 'border-box', outline: 'none'}} />
+          <div className="form-field">
+            <label htmlFor="login-email">Email</label>
+            <input
+              id="login-email"
+              type="email"
+              required
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+            />
           </div>
-          <div style={{marginBottom: '20px'}}>
-            <label style={{color: '#94A3B8', fontSize: '0.9rem'}}>Пароль</label>
-            <input type="password" required value={password} onChange={e => setPassword(e.target.value)} style={{width: '100%', padding: '12px', marginTop: '8px', borderRadius: '8px', border: '1px solid #334155', backgroundColor: '#0F172A', color: 'white', boxSizing: 'border-box', outline: 'none'}} />
+
+          <div className="form-field">
+            <label htmlFor="login-password">Пароль</label>
+            <input
+              id="login-password"
+              type="password"
+              required
+              minLength={8}
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+            />
           </div>
-          <button type="submit" disabled={isLoading} style={{backgroundColor: '#3B82F6', color: 'white', padding: '14px', borderRadius: '8px', border: 'none', width: '100%', cursor: 'pointer', fontWeight: 'bold', fontSize: '1rem'}}>
-            {isLoading ? 'Загрузка...' : 'Войти'}
+
+          <button type="submit" className="btn-primary" disabled={isLoading}>
+            {isLoading ? "Входим..." : "Войти"}
           </button>
         </form>
-        <p style={{textAlign: 'center', marginTop: '20px', color: '#94A3B8'}}>
-          Нет аккаунта? <Link to="/register" style={{color: '#3B82F6', textDecoration: 'none'}}>Зарегистрироваться</Link>
+
+        <p className="auth-switch">
+          Нет аккаунта? <Link to="/register">Зарегистрироваться</Link>
         </p>
       </div>
     </div>

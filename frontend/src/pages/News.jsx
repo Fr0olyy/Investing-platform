@@ -1,63 +1,81 @@
-import { useState, useEffect } from 'react';
-import { apiClient } from '../api/client';
+﻿import { useEffect, useMemo, useState } from "react";
+import { api } from "../api/client";
+
+const NEWS_PER_TICKER = 10;
 
 export default function News() {
-  const [newsList, setNewsList] = useState([]);
+  const [assets, setAssets] = useState([]);
+  const [allNews, setAllNews] = useState([]);
+  const [selectedTicker, setSelectedTicker] = useState("ВСЕ");
+  const [searchText, setSearchText] = useState("");
   const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
+  const [error, setError] = useState("");
+
+  const loadNews = async () => {
+    setIsLoading(true);
+    setError("");
+
+    try {
+      const assetsPayload = await api.assets.list();
+      const assetList = Array.isArray(assetsPayload) ? assetsPayload : [];
+      setAssets(assetList);
+
+      const newsResults = await Promise.allSettled(
+        assetList.map((asset) => api.assets.news(asset.ticker, NEWS_PER_TICKER)),
+      );
+
+      const merged = [];
+
+      newsResults.forEach((result, index) => {
+        if (result.status !== "fulfilled" || !Array.isArray(result.value)) return;
+
+        const ticker = assetList[index]?.ticker;
+        const name = assetList[index]?.name;
+
+        result.value.forEach((item, itemIndex) => {
+          merged.push({
+            id: `${ticker}-${item.published_at}-${itemIndex}`,
+            ticker,
+            assetName: name,
+            title: item.title,
+            summary: item.summary,
+            source: item.source,
+            sentiment: item.sentiment,
+            url: item.url,
+            publishedAt: item.published_at,
+          });
+        });
+      });
+
+      merged.sort((a, b) => new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime());
+      setAllNews(merged);
+    } catch (err) {
+      setError(err.message);
+      setAllNews([]);
+      setAssets([]);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   useEffect(() => {
-    const fetchNews = async () => {
-      setIsLoading(true);
-      setError('');
-      try {
-        // Поскольку в API новости привязаны к тикеру, запрашиваем сразу для нескольких лидеров рынка
-        const topTickers = ['SBER', 'GAZP', 'YDEX', 'LKOH'];
-        
-        // Делаем параллельные запросы к бэкенду
-        const promises = topTickers.map(ticker => 
-          apiClient(`/assets/${ticker}/news?limit=5`)
-            .catch(() => []) // Если для какого-то тикера новостей нет, возвращаем пустой массив, чтобы не сломать остальные
-        );
-        
-        const results = await Promise.all(promises);
-        
-        // Сливаем все массивы новостей в один большой список
-        let combinedNews = [];
-        results.forEach((tickerNews, index) => {
-          if (Array.isArray(tickerNews)) {
-            // Добавляем пометку, к какому тикеру относится новость (для красоты)
-            const newsWithTicker = tickerNews.map(n => ({ ...n, related_ticker: topTickers[index] }));
-            combinedNews = [...combinedNews, ...newsWithTicker];
-          }
-        });
-
-        // Сортируем новости по дате публикации (от свежих к старым)
-        // Если бэкенд отдает дату в поле published_at или time
-        combinedNews.sort((a, b) => {
-          const dateA = new Date(a.published_at || a.time || 0);
-          const dateB = new Date(b.published_at || b.time || 0);
-          return dateB - dateA;
-        });
-
-        setNewsList(combinedNews);
-      } catch (err) {
-        setError('Не удалось загрузить ленту новостей: ' + err.message);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    fetchNews();
+    loadNews();
   }, []);
 
-  // Фильтрация новостей по строке поиска
-  const filteredNews = newsList.filter(item => {
-    const titleMatch = (item.title || '').toLowerCase().includes(searchTerm.toLowerCase());
-    const textMatch = (item.text || item.content || '').toLowerCase().includes(searchTerm.toLowerCase());
-    return titleMatch || textMatch;
-  });
+  const filteredNews = useMemo(() => {
+    const query = searchText.trim().toLowerCase();
+
+    return allNews.filter((item) => {
+      const byTicker = selectedTicker === "ВСЕ" || item.ticker === selectedTicker;
+      const bySearch =
+        !query ||
+        item.title.toLowerCase().includes(query) ||
+        item.summary.toLowerCase().includes(query) ||
+        item.source.toLowerCase().includes(query);
+
+      return byTicker && bySearch;
+    });
+  }, [allNews, selectedTicker, searchText]);
 
   return (
     <div className="page-content">
@@ -65,47 +83,78 @@ export default function News() {
         <h1>Новости рынка</h1>
       </div>
 
-      <div className="filters">
-        <input 
-          type="text" 
-          placeholder="Поиск новостей..." 
-          className="search-input"
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-        />
-        <div className="filter-tags">
-          <button className="tag active">Все</button>
-          <button className="tag">Российский рынок</button>
-          <button className="tag">Мировой рынок</button>
-          <button className="tag">Криптовалюта</button>
+      <div className="card">
+        <div className="news-toolbar">
+          <div className="form-field">
+            <label htmlFor="news-search">Поиск по заголовку, описанию или источнику</label>
+            <input
+              id="news-search"
+              type="text"
+              value={searchText}
+              onChange={(event) => setSearchText(event.target.value)}
+              placeholder="Например: газ, ставка, индекс"
+            />
+          </div>
+
+          <div className="news-filters-row">
+            <div className="form-field">
+              <label htmlFor="news-ticker">Тикер</label>
+              <select
+                id="news-ticker"
+                value={selectedTicker}
+                onChange={(event) => setSelectedTicker(event.target.value)}
+              >
+                <option value="ВСЕ">Все</option>
+                {assets.map((asset) => (
+                  <option key={asset.ticker} value={asset.ticker}>
+                    {asset.ticker} — {asset.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button type="button" className="btn-secondary" onClick={loadNews}>
+              Обновить новости
+            </button>
+          </div>
         </div>
       </div>
 
-      {isLoading ? (
-        <p className="text-muted mt-4">Загрузка свежих новостей...</p>
-      ) : error ? (
-        <p className="text-red mt-4">{error}</p>
-      ) : filteredNews.length === 0 ? (
-        <p className="text-muted mt-4">По вашему запросу новостей не найдено.</p>
-      ) : (
-        <div className="news-list mt-4">
-          {filteredNews.map((item, index) => (
-            // Бэкенд может отдавать id, если нет - используем index как ключ
-            <div key={item.id || index} className="card news-card">
-              <span className="text-muted text-sm" style={{fontSize: '0.8rem'}}>
-                {item.source || 'Рыночная сводка'} • {item.published_at || item.time || 'Недавно'} • <b>{item.related_ticker}</b>
-              </span>
-              <h3 style={{margin: '8px 0'}}>{item.title}</h3>
-              {/* Бэкенд может отдавать текст в поле text или content */}
-              <p className="text-muted" style={{margin: 0}}>{item.text || item.content}</p>
+      {isLoading ? <p className="text-muted">Загрузка новостей...</p> : null}
+      {error ? <div className="error-message">{error}</div> : null}
+
+      {!isLoading && !error && (
+        <div className="news-list">
+          {filteredNews.length === 0 ? (
+            <div className="card">
+              <p className="text-muted">По выбранным фильтрам новостей не найдено.</p>
             </div>
-          ))}
-        </div>
-      )}
-      
-      {!isLoading && filteredNews.length > 0 && (
-        <div style={{textAlign: 'center'}} className="mt-4">
-          <button className="tag" onClick={() => alert('В демо-версии бэкенда показаны все доступные новости')}>Загрузить еще</button>
+          ) : (
+            filteredNews.map((item) => (
+              <article key={item.id} className="card news-card">
+                <div className="news-meta">
+                  <span>
+                    <strong>{item.ticker}</strong> — {item.assetName}
+                  </span>
+                  <span>{new Date(item.publishedAt).toLocaleString("ru-RU")}</span>
+                </div>
+
+                <h3>{item.title}</h3>
+                <p>{item.summary}</p>
+
+                <div className="news-footer">
+                  <span>Источник: {item.source}</span>
+                  <span className={`sentiment sentiment-${item.sentiment.toLowerCase()}`}>
+                    Тональность: {item.sentiment}
+                  </span>
+                </div>
+
+                <a className="inline-link" href={item.url} target="_blank" rel="noreferrer">
+                  Открыть оригинал новости
+                </a>
+              </article>
+            ))
+          )}
         </div>
       )}
     </div>

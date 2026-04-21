@@ -1,49 +1,72 @@
-import { NavLink, useNavigate } from 'react-router-dom';
-import { LayoutDashboard, Briefcase, TrendingUp, Newspaper, Settings } from 'lucide-react';
+﻿import {
+  Briefcase,
+  Gauge,
+  LineChart,
+  LogOut,
+  Newspaper,
+  Settings,
+  TrendingUp,
+} from "lucide-react";
+import { NavLink, useNavigate } from "react-router-dom";
+import { api, authStorage } from "../api/client";
 
 export default function Sidebar() {
   const navigate = useNavigate();
-  const token = localStorage.getItem('token'); // Проверяем авторизацию
+  const token = authStorage.getToken();
 
-  const handleLogout = (e) => {
-    e.preventDefault();
-    localStorage.removeItem('token');
-    navigate('/');
+  const handleLogout = () => {
+    api.auth.logout();
+    navigate("/login");
   };
 
   return (
     <aside className="sidebar">
       <div className="sidebar-logo">
-        <h3>Брокерский счет</h3>
+        <h3>Инвест-платформа</h3>
       </div>
+
       <nav className="sidebar-nav">
-        <NavLink to="/" className={({isActive}) => isActive ? "nav-link active" : "nav-link"}>
-          <LayoutDashboard size={20} /> Обзор
+        <NavLink to="/" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+          <Gauge size={18} /> Обзор
         </NavLink>
-        <NavLink to="/portfolio" className={({isActive}) => isActive ? "nav-link active" : "nav-link"}>
-          <Briefcase size={20} /> Портфель
+        <NavLink to="/portfolio" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+          <Briefcase size={18} /> Портфель
         </NavLink>
-        <NavLink to="/market" className={({isActive}) => isActive ? "nav-link active" : "nav-link"}>
-          <TrendingUp size={20} /> Рынок
+        <NavLink to="/market" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+          <TrendingUp size={18} /> Рынок
         </NavLink>
-        <NavLink to="/news" className={({isActive}) => isActive ? "nav-link active" : "nav-link"}>
-          <Newspaper size={20} /> Новости
+        <NavLink to="/news" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+          <Newspaper size={18} /> Новости
+        </NavLink>
+        <NavLink to="/ml" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+          <LineChart size={18} /> ML-анализ
         </NavLink>
       </nav>
-      
+
       <div className="sidebar-footer">
         {token ? (
-          <NavLink to="/profile" className="user-profile-link">
-            <div className="avatar">ИИ</div>
+          <div className="user-profile-link">
+            <div className="avatar">AI</div>
             <div className="user-info">
-              <span className="user-name">Мой профиль</span>
-              <span className="user-email" onClick={handleLogout} style={{cursor: 'pointer', color: '#EF4444'}}>Выйти</span>
+              <NavLink to="/profile" className="user-name-link">
+                Профиль
+              </NavLink>
+              <button type="button" className="logout-link" onClick={handleLogout}>
+                <LogOut size={14} /> Выйти
+              </button>
             </div>
-            <Settings size={18} />
-          </NavLink>
+            <NavLink
+              to="/settings"
+              className={({ isActive }) => (isActive ? "settings-link active" : "settings-link")}
+              title="Настройки"
+              aria-label="Настройки"
+            >
+              <Settings size={16} />
+            </NavLink>
+          </div>
         ) : (
           <NavLink to="/login" className="btn-sidebar-login">
-            Войти / Регистрация
+            Вход / Регистрация
           </NavLink>
         )}
       </div>
