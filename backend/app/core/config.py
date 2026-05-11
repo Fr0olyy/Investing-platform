@@ -21,7 +21,10 @@ class Settings(BaseSettings):
 
     DEBUG: bool = False
     ENVIRONMENT: str = "development"
-    BACKEND_CORS_ORIGINS: str = "http://localhost:3000,http://localhost:5173"
+    BACKEND_CORS_ORIGINS: str = (
+        "http://localhost:3000,http://localhost:5173,"
+        "http://127.0.0.1:3000,http://127.0.0.1:5173"
+    )
 
     ENABLE_BACKGROUND_JOBS: bool = True
     QUOTE_REFRESH_MINUTES: int = 30
@@ -41,6 +44,12 @@ class Settings(BaseSettings):
     MOEX_BASE_URL: str = "https://iss.moex.com/iss"
     CBR_BASE_URL: str = "https://www.cbr.ru"
     FRED_BRENT_CSV_URL: str = "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DCOILBRENTEU"
+    NEWS_PROVIDER: str = "real"
+    NEWS_RSS_URL: str = "https://news.google.com/rss/search"
+    NEWS_FEED_LANGUAGE: str = "ru"
+    NEWS_FEED_REGION: str = "RU"
+    NEWS_FETCH_LIMIT: int = 10
+    NEWS_SYNC_TTL_MINUTES: int = 30
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -1,22 +1,30 @@
 from datetime import datetime
 
-from pydantic import ConfigDict, EmailStr, Field
+from pydantic import ConfigDict, EmailStr, Field, field_validator
 
+from app.core.email_validation import validate_registration_email
 from app.schemas.base import APIModel
 
 
 class LoginRequest(APIModel):
-    email: EmailStr = Field(description="Email пользователя, который используется как логин.")
+    email: EmailStr = Field(max_length=254, description="Email пользователя.")
     password: str = Field(min_length=8, max_length=128, description="Пароль пользователя.")
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
-                "email": "investor@example.com",
+                "email": "investor@gmail.com",
                 "password": "securepass123",
             }
         }
     )
+
+
+class RegisterRequest(LoginRequest):
+    @field_validator("email")
+    @classmethod
+    def validate_email_for_registration(cls, value: str) -> str:
+        return validate_registration_email(str(value))
 
 
 class UserResponse(APIModel):
@@ -35,4 +43,4 @@ class TokenResponse(APIModel):
 
 class AuthResponse(APIModel):
     user: UserResponse = Field(description="Профиль пользователя.")
-    token: TokenResponse = Field(description="Токен для последующих запросов.")
+    token: TokenResponse = Field(description="Токен для следующих запросов.")

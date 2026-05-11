@@ -24,7 +24,7 @@ def test_health_and_auth_flow():
 
         register = client.post(
             "/api/v1/auth/register",
-            json={"email": "test@example.com", "password": "supersecure123"},
+            json={"email": "investor.check@gmail.com", "password": "supersecure123"},
         )
         assert register.status_code == 201
         token = register.json()["token"]["access_token"]
@@ -34,8 +34,29 @@ def test_health_and_auth_flow():
             headers={"Authorization": f"Bearer {token}"},
         )
         assert profile.status_code == 200
-        assert profile.json()["email"] == "test@example.com"
+        assert profile.json()["email"] == "investor.check@gmail.com"
 
         assets = client.get("/api/v1/assets")
         assert assets.status_code == 200
         assert len(assets.json()) >= 1
+
+
+def test_registration_rejects_unrealistic_email():
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/auth/register",
+            json={"email": "1@random.ru", "password": "supersecure123"},
+        )
+
+        assert response.status_code == 422
+
+
+def test_registration_accepts_realistic_email():
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/auth/register",
+            json={"email": "real.investor@gmail.com", "password": "supersecure123"},
+        )
+
+        assert response.status_code == 201
+        assert response.json()["user"]["email"] == "real.investor@gmail.com"

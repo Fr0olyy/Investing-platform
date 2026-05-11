@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useState } from "react";
-import { api } from "../api/client";
+import { api, authStorage } from "../api/client";
 
 const NEWS_PER_TICKER = 10;
 
@@ -9,7 +9,11 @@ export default function News() {
   const [selectedTicker, setSelectedTicker] = useState("ВСЕ");
   const [searchText, setSearchText] = useState("");
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [currentUser, setCurrentUser] = useState(null);
+
+  const isAdmin = currentUser?.role === "admin";
 
   const loadNews = async () => {
     setIsLoading(true);
@@ -62,6 +66,43 @@ export default function News() {
     loadNews();
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCurrentUser = async () => {
+      if (!authStorage.getToken()) {
+        setCurrentUser(null);
+        return;
+      }
+
+      try {
+        const user = await api.auth.me();
+        if (!cancelled) setCurrentUser(user);
+      } catch {
+        if (!cancelled) setCurrentUser(null);
+      }
+    };
+
+    loadCurrentUser();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const handleRefreshFromSource = async () => {
+    setIsRefreshing(true);
+    setError("");
+    try {
+      const ticker = selectedTicker === "ВСЕ" ? undefined : selectedTicker;
+      await api.system.refreshNews({ ticker, perAssetLimit: NEWS_PER_TICKER });
+      await loadNews();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
   const filteredNews = useMemo(() => {
     const query = searchText.trim().toLowerCase();
 
@@ -113,9 +154,19 @@ export default function News() {
               </select>
             </div>
 
-            <button type="button" className="btn-secondary" onClick={loadNews}>
-              Обновить новости
+            <button type="button" className="btn-secondary" onClick={loadNews} disabled={isLoading || isRefreshing}>
+              Перезагрузить ленту
             </button>
+            {isAdmin ? (
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={handleRefreshFromSource}
+                disabled={isLoading || isRefreshing}
+              >
+                {isRefreshing ? "Обновляем..." : "Обновить из источников"}
+              </button>
+            ) : null}
           </div>
         </div>
       </div>

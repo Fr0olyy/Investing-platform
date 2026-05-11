@@ -2,6 +2,56 @@
 import { Link, useNavigate } from "react-router-dom";
 import { api } from "../api/client";
 
+const EMAIL_MAX_LENGTH = 254;
+const LOCAL_PART_MIN_LENGTH = 3;
+const BLOCKED_EMAIL_DOMAINS = new Set([
+  "example.com",
+  "example.net",
+  "example.org",
+  "localhost",
+  "local",
+  "test.com",
+  "random.ru",
+  "mailinator.com",
+  "10minutemail.com",
+  "tempmail.com",
+  "temp-mail.org",
+]);
+const WEAK_LOCAL_PARTS = new Set(["test", "user", "admin", "qwe", "asd", "random", "email", "mail"]);
+
+const validateRegistrationEmail = (rawEmail) => {
+  const normalizedEmail = rawEmail.trim().toLowerCase();
+  const [localPart, domain, extra] = normalizedEmail.split("@");
+
+  if (normalizedEmail.length > EMAIL_MAX_LENGTH) {
+    return "Email слишком длинный. Максимум 254 символа.";
+  }
+
+  if (!localPart || !domain || extra !== undefined || !domain.includes(".")) {
+    return "Введите реальный email с доменом, например name@gmail.com.";
+  }
+
+  if (localPart.length < LOCAL_PART_MIN_LENGTH || localPart.length > 64) {
+    return "Часть email до @ должна быть от 3 до 64 символов.";
+  }
+
+  if (/^\d+$/.test(localPart) || WEAK_LOCAL_PARTS.has(localPart)) {
+    return "Введите более реальный email, а не тестовый адрес.";
+  }
+
+  if (BLOCKED_EMAIL_DOMAINS.has(domain)) {
+    return "Этот домен похож на тестовый. Укажите реальную почту.";
+  }
+
+  const domainLabels = domain.split(".");
+  const topLevelDomain = domainLabels.at(-1) || "";
+  if (domainLabels.some((label) => label.length < 1) || topLevelDomain.length < 2 || /^\d+$/.test(topLevelDomain)) {
+    return "Домен email указан некорректно.";
+  }
+
+  return "";
+};
+
 export default function Register() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
@@ -12,6 +62,13 @@ export default function Register() {
   const handleSubmit = async (event) => {
     event.preventDefault();
     setError("");
+
+    const emailError = validateRegistrationEmail(email);
+    if (emailError) {
+      setError(emailError);
+      return;
+    }
+
     setIsLoading(true);
 
     try {
@@ -38,6 +95,7 @@ export default function Register() {
               id="register-email"
               type="email"
               required
+              maxLength={EMAIL_MAX_LENGTH}
               value={email}
               onChange={(event) => setEmail(event.target.value)}
             />

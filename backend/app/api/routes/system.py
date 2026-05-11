@@ -1,9 +1,11 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.api.dependencies import get_current_admin
 from app.core.config import settings
 from app.db.database import get_db
+from app.db.models import User
 from app.schemas.system import BackgroundRefreshResponse, HealthResponse
 from app.services.bootstrap_service import background_jobs_enabled
 from app.services.market_service import MarketService
@@ -17,7 +19,7 @@ router = APIRouter(prefix="/system", tags=["System"])
     "/health",
     response_model=HealthResponse,
     summary="Проверка здоровья сервиса",
-    description="Показывает, что backend запущен, БД доступна, а системные задачи готовы к работе.",
+    description="Показывает, что backend запущен и база данных доступна.",
 )
 def healthcheck(db: Session = Depends(get_db)) -> HealthResponse:
     db.execute(text("SELECT 1"))
@@ -35,9 +37,12 @@ def healthcheck(db: Session = Depends(get_db)) -> HealthResponse:
     "/market/refresh",
     response_model=BackgroundRefreshResponse,
     summary="Ручное обновление рынка",
-    description="Синхронизирует реальные котировки, дневные свечи и макроиндикаторы. При недоступности внешних API падает на fallback-режим.",
+    description="Обновляет котировки, свечи и макроиндикаторы.",
 )
-def refresh_market_data(db: Session = Depends(get_db)) -> BackgroundRefreshResponse:
+def refresh_market_data(
+    db: Session = Depends(get_db),
+    _current_admin: User = Depends(get_current_admin),
+) -> BackgroundRefreshResponse:
     quotes_updated = MarketService.refresh_market_snapshot(db, source="manual-refresh")
     return BackgroundRefreshResponse(
         message="Рыночные данные обновлены.",
@@ -49,9 +54,12 @@ def refresh_market_data(db: Session = Depends(get_db)) -> BackgroundRefreshRespo
     "/ml/train",
     response_model=BackgroundRefreshResponse,
     summary="Обучение ML-моделей",
-    description="Собирает реальные исторические ряды, обучает линейные модели по каждому активу и сохраняет артефакты на диск.",
+    description="Обучает модели по доступным активам.",
 )
-def train_models(db: Session = Depends(get_db)) -> BackgroundRefreshResponse:
+def train_models(
+    db: Session = Depends(get_db),
+    _current_admin: User = Depends(get_current_admin),
+) -> BackgroundRefreshResponse:
     trained_models = MLService.train_models(db)
     return BackgroundRefreshResponse(
         message="ML-модели обучены.",
@@ -62,12 +70,35 @@ def train_models(db: Session = Depends(get_db)) -> BackgroundRefreshResponse:
 @router.post(
     "/ml/refresh",
     response_model=BackgroundRefreshResponse,
-    summary="Пересчет прогнозов",
-    description="Использует обученные модели и актуальные макрофакторы для обновления кэша прогнозов.",
+    summary="Пересчёт прогнозов",
+    description="Обновляет кэш прогнозов на основе текущих данных.",
 )
-def refresh_ml_predictions(db: Session = Depends(get_db)) -> BackgroundRefreshResponse:
+def refresh_ml_predictions(
+    db: Session = Depends(get_db),
+    _current_admin: User = Depends(get_current_admin),
+) -> BackgroundRefreshResponse:
     predictions_updated = MLService.refresh_predictions(db)
     return BackgroundRefreshResponse(
-        message="Кэш прогнозов обновлен.",
+        message="Кэш прогнозов обновлён.",
         affected_records=predictions_updated,
+    )
+
+
+@router.post(
+    "/news/refresh",
+    response_model=BackgroundRefreshResponse,
+    summary="Ручное обновление новостей",
+    description="Принудительно подтягивает новости из внешних источников.",
+)
+def refresh_news(
+    ticker: str | None = Query(default=None, description="Тикер. Если не указан, обновляются все активы."),
+    per_asset_limit: int = Query(default=10, ge=1, le=50, description="Лимит новостей на один актив."),
+    db: Session = Depends(get_db),
+    _current_admin: User = Depends(get_current_admin),
+) -> BackgroundRefreshResponse:
+    inserted = MarketService.refresh_news(db, ticker=ticker, per_asset_limit=per_asset_limit)
+    scope = f"по тикеру {ticker.upper()}" if ticker else "по всем активам"
+    return BackgroundRefreshResponse(
+        message=f"Новости обновлены {scope}.",
+        affected_records=inserted,
     )

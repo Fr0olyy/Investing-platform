@@ -4,9 +4,6 @@ import { api } from "../api/client";
 export default function SettingsPage() {
   const [isLightTheme, setIsLightTheme] = useState(localStorage.getItem("theme") === "light");
 
-  const [serviceResult, setServiceResult] = useState("");
-  const [serviceLoading, setServiceLoading] = useState("");
-
   const [oauthEmail, setOauthEmail] = useState("");
   const [oauthPassword, setOauthPassword] = useState("");
   const [oauthToken, setOauthToken] = useState("");
@@ -23,26 +20,6 @@ export default function SettingsPage() {
     } else {
       localStorage.setItem("theme", "dark");
       document.body.classList.remove("light-theme");
-    }
-  };
-
-  const runServiceAction = async (actionKey, action) => {
-    setServiceLoading(actionKey);
-    setServiceResult("");
-
-    try {
-      const response = await action();
-      if (response?.message) {
-        setServiceResult(`${response.message} (изменено записей: ${response.affected_records ?? "-"})`);
-      } else if (response?.status) {
-        setServiceResult(`Сервис: ${response.status}, БД: ${response.database}, среда: ${response.environment}`);
-      } else {
-        setServiceResult("Операция выполнена.");
-      }
-    } catch (error) {
-      setServiceResult(`Ошибка: ${error.message}`);
-    } finally {
-      setServiceLoading("");
     }
   };
 
@@ -78,51 +55,6 @@ export default function SettingsPage() {
             {isLightTheme ? "Включить тёмную тему" : "Включить светлую тему"}
           </button>
         </div>
-      </div>
-
-      <div className="card settings-card">
-        <h3>Сервисные endpoint-ы backend</h3>
-        <p className="text-muted">Здесь можно вызвать системные операции напрямую из фронтенда.</p>
-
-        <div className="quick-actions mt-4">
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => runServiceAction("health", () => api.system.health())}
-            disabled={Boolean(serviceLoading)}
-          >
-            {serviceLoading === "health" ? "Проверяем..." : "Проверить health"}
-          </button>
-
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => runServiceAction("market", () => api.system.refreshMarket())}
-            disabled={Boolean(serviceLoading)}
-          >
-            {serviceLoading === "market" ? "Обновляем..." : "Обновить рынок"}
-          </button>
-
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => runServiceAction("train", () => api.system.trainModels())}
-            disabled={Boolean(serviceLoading)}
-          >
-            {serviceLoading === "train" ? "Обучаем..." : "Обучить ML-модели"}
-          </button>
-
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => runServiceAction("refresh", () => api.system.refreshPredictions())}
-            disabled={Boolean(serviceLoading)}
-          >
-            {serviceLoading === "refresh" ? "Пересчитываем..." : "Обновить ML-прогнозы"}
-          </button>
-        </div>
-
-        {serviceResult && <p className="text-muted mt-4">{serviceResult}</p>}
       </div>
 
       <div className="card settings-card">

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from email.utils import parsedate_to_datetime
 from io import StringIO
 from typing import Any
 from xml.etree import ElementTree
@@ -24,6 +25,16 @@ class MarketSnapshot:
     value: float
     source: str
     recorded_at: datetime
+
+
+@dataclass(slots=True)
+class NewsSnapshot:
+    title: str
+    summary: str
+    url: str
+    source: str
+    sentiment: str
+    published_at: datetime
 
 
 class MarketDataClient:
@@ -55,11 +66,25 @@ class MarketDataClient:
 
         md = marketdata[0]
         sec = securities[0]
-        price = self._first_number(md, "LAST", "MARKETPRICE", "LCURRENTPRICE", "CLOSEPRICE", "OPEN")
-        prev_close = self._first_number(md, "LCLOSEPRICE", "CLOSEPRICE", default=price)
-        open_price = self._first_number(md, "OPEN", default=price)
-        high = self._first_number(md, "HIGH", default=price)
-        low = self._first_number(md, "LOW", default=price)
+        seed_price = self._first_positive_number(sec, "PREVPRICE", default=0.0)
+        price = self._first_positive_number(
+            md,
+            "LAST",
+            "MARKETPRICE",
+            "LCURRENTPRICE",
+            "LEGALCLOSEPRICE",
+            "WAPRICE",
+            "CLOSEPRICE",
+            "OPEN",
+            default=seed_price,
+        )
+        if price <= 0:
+            raise ExternalDataError(f"No valid MOEX price for {ticker}.")
+
+        prev_close = self._first_positive_number(md, "LCLOSEPRICE", "CLOSEPRICE", "PREVPRICE", default=price)
+        open_price = self._first_positive_number(md, "OPEN", default=price)
+        high = self._first_positive_number(md, "HIGH", default=max(price, open_price))
+        low = self._first_positive_number(md, "LOW", default=min(price, open_price))
         volume = int(float(md.get("VOLTODAY") or md.get("VALTODAY") or 0))
         change_percent = (
             ((price - prev_close) / prev_close) * 100
@@ -261,6 +286,57 @@ class MarketDataClient:
             self.fetch_index_snapshot("RGBI"),
         ]
 
+    def fetch_asset_news(self, ticker: str, company_name: str, limit: int = 10) -> list[NewsSnapshot]:
+        query = self._build_news_query(ticker, company_name)
+        response = self._client.get(
+            settings.NEWS_RSS_URL,
+            params={
+                "q": query,
+                "hl": settings.NEWS_FEED_LANGUAGE,
+                "gl": settings.NEWS_FEED_REGION,
+                "ceid": f"{settings.NEWS_FEED_REGION}:{settings.NEWS_FEED_LANGUAGE}",
+            },
+        )
+        response.raise_for_status()
+
+        try:
+            root = ElementTree.fromstring(response.text)
+        except ElementTree.ParseError as exc:
+            raise ExternalDataError(f"Unable to parse RSS response for {ticker}.") from exc
+
+        raw_items = root.findall("./channel/item")
+        if not raw_items:
+            raw_items = root.findall(".//item")
+
+        snapshots: list[NewsSnapshot] = []
+        for item in raw_items:
+            title = (item.findtext("title") or "").strip()
+            url = (item.findtext("link") or "").strip()
+            if not title or not url:
+                continue
+
+            summary_html = item.findtext("description") or ""
+            summary = self._strip_html(summary_html)
+            source_node = item.find("source")
+            source = (source_node.text or "").strip() if source_node is not None else ""
+            published_at = self._parse_rss_datetime(item.findtext("pubDate"))
+
+            snapshots.append(
+                NewsSnapshot(
+                    title=title,
+                    summary=summary or f"Новость по активу {ticker.upper()}",
+                    url=url,
+                    source=source or "Google News",
+                    sentiment=self._detect_sentiment(title, summary),
+                    published_at=published_at,
+                )
+            )
+
+            if len(snapshots) >= limit:
+                break
+
+        return snapshots
+
     def _fetch_moex_history(self, path: str, start_date: date, end_date: date) -> list[dict[str, Any]]:
         all_rows: list[dict[str, Any]] = []
         start_index = 0
@@ -305,6 +381,17 @@ class MarketDataClient:
         return float(default)
 
     @staticmethod
+    def _first_positive_number(payload: dict[str, Any], *keys: str, default: float = 0.0) -> float:
+        for key in keys:
+            value = payload.get(key)
+            if value in (None, ""):
+                continue
+            number = float(value)
+            if number > 0:
+                return number
+        return float(default)
+
+    @staticmethod
     def _parse_moex_datetime(system_time: str | None, fallback_time: str | None) -> datetime:
         if system_time:
             try:
@@ -316,3 +403,40 @@ class MarketDataClient:
             parsed_time = datetime.strptime(fallback_time, "%H:%M:%S").time()
             return datetime.combine(now.date(), parsed_time)
         return datetime.now()
+
+    @staticmethod
+    def _build_news_query(ticker: str, company_name: str) -> str:
+        safe_company = " ".join(company_name.split()) if company_name else ticker.upper()
+        return f'"{ticker.upper()}" OR "{safe_company}" акции MOEX'
+
+    @staticmethod
+    def _strip_html(raw_html: str) -> str:
+        if not raw_html:
+            return ""
+        text = BeautifulSoup(raw_html, "html.parser").get_text(" ", strip=True)
+        return " ".join(text.split())[:500]
+
+    @staticmethod
+    def _parse_rss_datetime(raw_date: str | None) -> datetime:
+        if not raw_date:
+            return datetime.now()
+        try:
+            parsed = parsedate_to_datetime(raw_date)
+        except (TypeError, ValueError):
+            return datetime.now()
+        if parsed.tzinfo is not None:
+            return parsed.astimezone(UTC).replace(tzinfo=None)
+        return parsed
+
+    @staticmethod
+    def _detect_sentiment(title: str, summary: str) -> str:
+        text = f"{title} {summary}".lower()
+        positive_keywords = ("рост", "вырос", "прибыль", "рекорд", "дивиденд", "подорожал", "повысил", "укрепился")
+        negative_keywords = ("падение", "снижение", "убыток", "санкц", "обвал", "штраф", "дешевеет", "риски")
+        has_positive = any(keyword in text for keyword in positive_keywords)
+        has_negative = any(keyword in text for keyword in negative_keywords)
+        if has_positive and not has_negative:
+            return "positive"
+        if has_negative and not has_positive:
+            return "negative"
+        return "neutral"

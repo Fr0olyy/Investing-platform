@@ -286,7 +286,8 @@ export default function Dashboard() {
       setError("");
 
       try {
-        const [assetsPayload, healthPayload] = await Promise.all([api.assets.list(), api.system.health()]);
+        const healthPayload = await api.system.health();
+        const assetsPayload = await api.assets.list();
 
         if (!cancelled) {
           setAssets(Array.isArray(assetsPayload) ? assetsPayload : []);

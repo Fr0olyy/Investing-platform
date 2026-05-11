@@ -1,6 +1,8 @@
 ﻿const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000/api/v1";
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL).replace(/\/+$/, "");
 const TOKEN_KEY = "token";
+const NETWORK_RETRY_COUNT = 2;
+const NETWORK_RETRY_DELAY_MS = 450;
 
 const sanitizeToken = (token) => {
   if (!token || typeof token !== "string") return null;
@@ -24,6 +26,8 @@ const extractErrorMessage = (status, payload) => {
   const fallback = `Ошибка сервера (${status})`;
   if (!payload) return fallback;
   if (typeof payload === "string") return payload;
+  if (status === 403) return "Недостаточно прав. Это действие доступно только администратору.";
+  if (status === 401) return "Нужно войти в аккаунт.";
   if (typeof payload.detail === "string") return payload.detail;
   if (Array.isArray(payload.detail)) {
     return payload.detail.map((item) => `${item.loc?.[item.loc.length - 1] || "field"}: ${item.msg}`).join(" | ");
@@ -32,10 +36,33 @@ const extractErrorMessage = (status, payload) => {
   return fallback;
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const buildBackendUnavailableMessage = (url) =>
+  `Нет ответа от backend (${url}). Проверьте, что backend запущен и доступен на порту 8000.`;
+
+const fetchWithRetry = async (url, options) => {
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= NETWORK_RETRY_COUNT; attempt += 1) {
+    try {
+      return await fetch(url, options);
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        throw error;
+      }
+      lastError = error;
+      if (attempt < NETWORK_RETRY_COUNT) {
+        await sleep(NETWORK_RETRY_DELAY_MS);
+      }
+    }
+  }
+
+  throw new Error(buildBackendUnavailableMessage(url), { cause: lastError });
+};
+
 const extractTokenFromAuthPayload = (payload) => {
-  return sanitizeToken(
-    payload?.token?.access_token || payload?.access_token || payload?.token || payload?.jwt || null,
-  );
+  return sanitizeToken(payload?.token?.access_token || payload?.access_token || payload?.token || payload?.jwt || null);
 };
 
 export const authStorage = {
@@ -75,7 +102,8 @@ export const apiClient = async (endpoint, options = {}) => {
     headers["Content-Type"] = "application/json";
   }
 
-  const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+  const url = `${API_BASE_URL}${endpoint}`;
+  const response = await fetchWithRetry(url, {
     method,
     headers,
     body: body !== undefined && !isFormData && typeof body !== "string" ? JSON.stringify(body) : body,
@@ -84,7 +112,7 @@ export const apiClient = async (endpoint, options = {}) => {
 
   const payload = await parseResponseBody(response);
   if (!response.ok) {
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401) {
       authStorage.clearToken();
     }
     throw new Error(extractErrorMessage(response.status, payload));
@@ -178,13 +206,20 @@ export const api = {
       return apiClient("/system/health", { auth: false });
     },
     refreshMarket() {
-      return apiClient("/system/market/refresh", { method: "POST", auth: false });
+      return apiClient("/system/market/refresh", { method: "POST" });
     },
     trainModels() {
-      return apiClient("/system/ml/train", { method: "POST", auth: false });
+      return apiClient("/system/ml/train", { method: "POST" });
     },
     refreshPredictions() {
-      return apiClient("/system/ml/refresh", { method: "POST", auth: false });
+      return apiClient("/system/ml/refresh", { method: "POST" });
+    },
+    refreshNews({ ticker, perAssetLimit } = {}) {
+      const params = new URLSearchParams();
+      if (ticker) params.set("ticker", ticker);
+      if (Number.isFinite(perAssetLimit)) params.set("per_asset_limit", String(perAssetLimit));
+      const suffix = params.toString() ? `?${params.toString()}` : "";
+      return apiClient(`/system/news/refresh${suffix}`, { method: "POST" });
     },
   },
 };

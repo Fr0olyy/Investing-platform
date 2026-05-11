@@ -25,7 +25,7 @@ export default function Market() {
   const [prediction, setPrediction] = useState(null);
   const [modelMeta, setModelMeta] = useState(null);
 
-  const [tradeQuantity, setTradeQuantity] = useState(1);
+  const [tradeQuantity, setTradeQuantity] = useState("1");
   const [tradeSide, setTradeSide] = useState("BUY");
 
   const [isLoadingAssets, setIsLoadingAssets] = useState(true);
@@ -138,7 +138,8 @@ export default function Market() {
       return;
     }
 
-    if (!tradeQuantity || tradeQuantity < 1) {
+    const quantity = Number(tradeQuantity);
+    if (!Number.isInteger(quantity) || quantity < 1) {
       setTradeMessage("Количество должно быть больше нуля.");
       return;
     }
@@ -147,7 +148,7 @@ export default function Market() {
     setTradeMessage("");
 
     try {
-      const payload = { ticker: selectedTicker, quantity: Number(tradeQuantity) };
+      const payload = { ticker: selectedTicker, quantity };
       const response = tradeSide === "BUY" ? await api.trades.buy(payload) : await api.trades.sell(payload);
       setTradeMessage(response.message || "Сделка выполнена.");
 
@@ -226,6 +227,12 @@ export default function Market() {
               </h3>
               <p className="text-muted">Сектор: {assetDetails.sector}</p>
               <p>Текущая цена: {formatMoney(assetDetails.latest_quote?.price)}</p>
+              <p className="text-muted">Источник: {assetDetails.latest_quote?.source || "нет данных"}</p>
+              {assetDetails.latest_quote?.recorded_at ? (
+                <p className="text-muted">
+                  Обновлено: {new Date(assetDetails.latest_quote.recorded_at).toLocaleString("ru-RU")}
+                </p>
+              ) : null}
               <p className={assetDetails.latest_quote?.change_percent >= 0 ? "text-green" : "text-red"}>
                 Изменение: {assetDetails.latest_quote?.change_percent >= 0 ? "+" : ""}
                 {Number(assetDetails.latest_quote?.change_percent || 0).toFixed(2)}%
@@ -251,10 +258,10 @@ export default function Market() {
                     <option value="SELL">Продажа</option>
                   </select>
                   <input
-                    type="number"
-                    min={1}
+                    type="text"
+                    inputMode="numeric"
                     value={tradeQuantity}
-                    onChange={(event) => setTradeQuantity(Number(event.target.value))}
+                    onChange={(event) => setTradeQuantity(event.target.value.replace(/\D/g, ""))}
                   />
                 </div>
                 <button type="button" className="btn-primary" onClick={handleTrade} disabled={isTrading}>

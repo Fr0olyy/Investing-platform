@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta
 from decimal import Decimal, ROUND_HALF_UP
+import logging
 from random import uniform
 
 from fastapi import HTTPException, status
@@ -13,6 +14,8 @@ from app.db.models import Asset, Candle, MacroIndicatorSnapshot, NewsArticle, Pr
 from app.integrations.market_data_client import ExternalDataError, MarketDataClient
 from app.schemas.asset import AssetDetailsResponse, AssetListItem, CandleResponse, NewsArticleResponse, QuoteSnapshot
 from app.schemas.ml import DriverContribution, PredictionResponse
+
+logger = logging.getLogger(__name__)
 
 
 def money(value: Decimal | float | int) -> Decimal:
@@ -96,13 +99,39 @@ class MarketService:
     @staticmethod
     def get_news(db: Session, ticker: str, limit: int) -> list[NewsArticleResponse]:
         asset = MarketService.get_asset_or_404(db, ticker)
+        MarketService._refresh_asset_news_if_needed(
+            db=db,
+            asset=asset,
+            fetch_limit=max(limit, settings.NEWS_FETCH_LIMIT),
+            force=False,
+        )
         news = db.scalars(
             select(NewsArticle)
             .where(NewsArticle.asset_id == asset.id)
             .order_by(desc(NewsArticle.published_at))
-            .limit(limit)
+            .limit(max(limit * 5, 20))
         ).all()
-        return [NewsArticleResponse.model_validate(item) for item in news]
+        non_demo_news = [item for item in news if item.source != "Demo Feed"]
+        final_news = non_demo_news[:limit] if non_demo_news else news[:limit]
+        return [NewsArticleResponse.model_validate(item) for item in final_news]
+
+    @staticmethod
+    def refresh_news(db: Session, ticker: str | None = None, per_asset_limit: int | None = None) -> int:
+        fetch_limit = max(1, min(per_asset_limit or settings.NEWS_FETCH_LIMIT, 50))
+        if ticker:
+            assets = [MarketService.get_asset_or_404(db, ticker)]
+        else:
+            assets = db.scalars(select(Asset).where(Asset.is_active.is_(True)).order_by(Asset.ticker)).all()
+
+        inserted_total = 0
+        for asset in assets:
+            inserted_total += MarketService._refresh_asset_news_if_needed(
+                db=db,
+                asset=asset,
+                fetch_limit=fetch_limit,
+                force=True,
+            )
+        return inserted_total
 
     @staticmethod
     def refresh_market_snapshot(db: Session, source: str = "scheduler") -> int:
@@ -112,12 +141,10 @@ class MarketService:
         try:
             with MarketDataClient() as client:
                 return MarketService._refresh_market_snapshot_real(db, client, source)
-        except ExternalDataError:
-            db.rollback()
-            return MarketService._refresh_market_snapshot_mock(db, f"{source}-fallback")
         except Exception:
+            logger.exception("Real market refresh failed")
             db.rollback()
-            return MarketService._refresh_market_snapshot_mock(db, f"{source}-fallback")
+            return 0
 
     @staticmethod
     def get_latest_macro_values(db: Session) -> dict[str, float]:
@@ -141,42 +168,63 @@ class MarketService:
         history_end = date.today()
 
         for asset in assets:
-            snapshot = client.fetch_share_snapshot(asset.ticker, board=asset.board)
-            asset.name = snapshot["name"] or asset.name
-            asset.lot_size = snapshot["lot_size"] or asset.lot_size
+            try:
+                snapshot = client.fetch_share_snapshot(asset.ticker, board=asset.board)
+                asset.name = snapshot["name"] or asset.name
+                asset.lot_size = snapshot["lot_size"] or asset.lot_size
 
-            db.add(
-                Quote(
-                    asset_id=asset.id,
-                    price=money(snapshot["price"]),
-                    open=money(snapshot["open"]),
-                    high=money(snapshot["high"]),
-                    low=money(snapshot["low"]),
-                    close=money(snapshot["close"]),
-                    prev_close=money(snapshot["prev_close"]),
-                    change_percent=money(snapshot["change_percent"]),
-                    volume=int(snapshot["volume"]),
-                    source=snapshot["source"],
-                    recorded_at=snapshot["recorded_at"],
+                db.add(
+                    Quote(
+                        asset_id=asset.id,
+                        price=money(snapshot["price"]),
+                        open=money(snapshot["open"]),
+                        high=money(snapshot["high"]),
+                        low=money(snapshot["low"]),
+                        close=money(snapshot["close"]),
+                        prev_close=money(snapshot["prev_close"]),
+                        change_percent=money(snapshot["change_percent"]),
+                        volume=int(snapshot["volume"]),
+                        source=snapshot["source"],
+                        recorded_at=snapshot["recorded_at"],
+                    )
                 )
-            )
 
-            history_frame = client.fetch_share_history(asset.ticker, history_start, history_end, board=asset.board)
-            MarketService._upsert_candles_from_frame(db, asset.id, history_frame)
-            updated += 1
+                try:
+                    history_frame = client.fetch_share_history(asset.ticker, history_start, history_end, board=asset.board)
+                    MarketService._upsert_candles_from_frame(db, asset.id, history_frame)
+                except Exception:
+                    logger.exception("Real candle history refresh failed for %s", asset.ticker)
 
-        for macro_snapshot in client.fetch_current_macro_snapshot():
-            db.add(
-                MacroIndicatorSnapshot(
-                    code=macro_snapshot.code,
-                    name=macro_snapshot.name,
-                    value=macro_snapshot.value,
-                    source=macro_snapshot.source,
-                    recorded_at=macro_snapshot.recorded_at,
+                db.commit()
+                updated += 1
+            except Exception:
+                db.rollback()
+                logger.exception("Real quote refresh failed for %s", asset.ticker)
+
+        macro_fetchers = [
+            client.fetch_current_brent,
+            client.fetch_current_usd_rub,
+            lambda: client.fetch_index_snapshot("IMOEX"),
+            client.fetch_current_key_rate,
+            lambda: client.fetch_index_snapshot("RGBI"),
+        ]
+        for fetch_macro_snapshot in macro_fetchers:
+            try:
+                macro_snapshot = fetch_macro_snapshot()
+                db.add(
+                    MacroIndicatorSnapshot(
+                        code=macro_snapshot.code,
+                        name=macro_snapshot.name,
+                        value=macro_snapshot.value,
+                        source=macro_snapshot.source,
+                        recorded_at=macro_snapshot.recorded_at,
+                    )
                 )
-            )
+                db.commit()
+            except Exception:
+                db.rollback()
+                logger.exception("Real macro indicator refresh failed")
 
-        db.commit()
         return updated
 
     @staticmethod
@@ -298,3 +346,71 @@ class MarketService:
             generated_at=prediction.generated_at,
             is_placeholder=prediction.is_placeholder,
         )
+
+    @staticmethod
+    def _refresh_asset_news_if_needed(db: Session, asset: Asset, fetch_limit: int, force: bool = False) -> int:
+        if settings.MARKET_DATA_PROVIDER.lower() == "mock":
+            return 0
+        if settings.NEWS_PROVIDER.lower() == "mock":
+            return 0
+        if not force and not MarketService._news_is_stale(db, asset.id):
+            return 0
+
+        try:
+            with MarketDataClient() as client:
+                snapshots = client.fetch_asset_news(asset.ticker, asset.name, limit=fetch_limit)
+        except ExternalDataError:
+            db.rollback()
+            return 0
+        except Exception:
+            logger.exception("News sync failed for %s", asset.ticker)
+            db.rollback()
+            return 0
+
+        if not snapshots:
+            return 0
+
+        existing_urls = set(
+            db.scalars(select(NewsArticle.url).where(NewsArticle.asset_id == asset.id)).all()
+        )
+        existing_titles = set(
+            db.scalars(select(NewsArticle.title).where(NewsArticle.asset_id == asset.id)).all()
+        )
+
+        inserted = 0
+        for snapshot in snapshots:
+            if snapshot.url in existing_urls or snapshot.title in existing_titles:
+                continue
+            db.add(
+                NewsArticle(
+                    asset_id=asset.id,
+                    title=snapshot.title,
+                    summary=snapshot.summary,
+                    url=snapshot.url,
+                    source=snapshot.source,
+                    sentiment=snapshot.sentiment,
+                    published_at=snapshot.published_at,
+                )
+            )
+            existing_urls.add(snapshot.url)
+            existing_titles.add(snapshot.title)
+            inserted += 1
+
+        if inserted:
+            db.commit()
+        return inserted
+
+    @staticmethod
+    def _news_is_stale(db: Session, asset_id: str) -> bool:
+        latest_news = db.scalar(
+            select(NewsArticle)
+            .where(
+                NewsArticle.asset_id == asset_id,
+                NewsArticle.source != "Demo Feed",
+            )
+            .order_by(desc(NewsArticle.created_at))
+            .limit(1)
+        )
+        if not latest_news:
+            return True
+        return (datetime.now() - latest_news.created_at) >= timedelta(minutes=settings.NEWS_SYNC_TTL_MINUTES)

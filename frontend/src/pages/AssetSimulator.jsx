@@ -11,14 +11,15 @@ import {
 import { api } from "../api/client";
 
 const DEFAULT_FACTORS = {
-  BRENT: 88.5,
-  USD_RUB: 97.2,
-  IMOEX: 3300,
-  KEY_RATE: 15,
-  RGBI: 109.3,
+  BRENT: "88.5",
+  USD_RUB: "97.2",
+  IMOEX: "3300",
+  KEY_RATE: "15",
+  RGBI: "109.3",
 };
 
 const formatNumber = (value, digits = 2) => Number(value || 0).toFixed(digits);
+const parseFactorValue = (value) => Number(String(value).replace(",", "."));
 
 export default function AssetSimulator() {
   const [assets, setAssets] = useState([]);
@@ -131,7 +132,7 @@ export default function AssetSimulator() {
   }, [loadForTicker, ticker]);
 
   const handleFactorChange = (code, value) => {
-    setFactors((prev) => ({ ...prev, [code]: Number(value) }));
+    setFactors((prev) => ({ ...prev, [code]: value }));
   };
 
   const runScenario = async () => {
@@ -141,7 +142,17 @@ export default function AssetSimulator() {
     setError("");
 
     try {
-      const payload = await api.ml.scenario({ ticker, factors });
+      const parsedFactors = Object.fromEntries(
+        Object.entries(factors).map(([code, value]) => [code, parseFactorValue(value)]),
+      );
+
+      const invalidFactor = Object.entries(parsedFactors).find(([, value]) => !Number.isFinite(value));
+      if (invalidFactor) {
+        setError(`Заполните корректное значение для ${invalidFactor[0]}.`);
+        return;
+      }
+
+      const payload = await api.ml.scenario({ ticker, factors: parsedFactors });
       setScenarioResult(payload);
     } catch (err) {
       setError(err.message);
@@ -260,8 +271,8 @@ export default function AssetSimulator() {
                     <label htmlFor={`factor-${code}`}>{code}</label>
                     <input
                       id={`factor-${code}`}
-                      type="number"
-                      step="0.1"
+                      type="text"
+                      inputMode="decimal"
                       value={value}
                       onChange={(event) => handleFactorChange(code, event.target.value)}
                     />
