@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from app.api.dependencies import get_current_user
 from app.db.database import get_db
 from app.db.models import User
-from app.schemas.auth import AuthResponse, LoginRequest, TokenResponse, UserResponse
+from app.schemas.auth import AuthResponse, LoginRequest, RegisterRequest, TokenResponse, UserResponse
 from app.services.auth_service import AuthService
 
 
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
     summary="Регистрация инвестора",
     description="Создает пользователя, автоматически открывает виртуальный счет и возвращает JWT-токен.",
 )
-def register(payload: LoginRequest, db: Session = Depends(get_db)) -> AuthResponse:
+def register(payload: RegisterRequest, db: Session = Depends(get_db)) -> AuthResponse:
     return AuthService.register(db=db, email=payload.email, password=payload.password)
 
 

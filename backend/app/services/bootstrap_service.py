@@ -1,4 +1,7 @@
-from __future__ import annotations
+﻿from __future__ import annotations
+
+import logging
+import threading
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -9,17 +12,53 @@ from app.services.market_service import MarketService
 from app.services.ml_service import MLService
 
 
+logger = logging.getLogger(__name__)
 _scheduler: BackgroundScheduler | None = None
+_startup_jobs_thread: threading.Thread | None = None
 
 
 def initialize_application() -> None:
+    """
+    Fast startup path: only DB init + seed synchronously.
+    Heavy market/ML warm-up runs in background so API is available immediately.
+    """
     init_db()
     with SessionLocal() as db:
         seed_reference_data(db)
-        MarketService.refresh_market_snapshot(db, source="startup")
+
+    _start_startup_jobs_thread()
+
+
+def _start_startup_jobs_thread() -> None:
+    global _startup_jobs_thread
+
+    if _startup_jobs_thread and _startup_jobs_thread.is_alive():
+        return
+
+    _startup_jobs_thread = threading.Thread(target=run_startup_jobs, name="startup-jobs", daemon=True)
+    _startup_jobs_thread.start()
+
+
+def run_startup_jobs() -> None:
+    with SessionLocal() as db:
+        try:
+            MarketService.refresh_market_snapshot(db, source="startup")
+        except Exception:
+            logger.exception("Startup market refresh failed")
+            db.rollback()
+
         if settings.ML_AUTO_TRAIN_ON_STARTUP:
-            MLService.train_models(db)
-        MLService.refresh_predictions(db)
+            try:
+                MLService.train_models(db)
+            except Exception:
+                logger.exception("Startup ML training failed")
+                db.rollback()
+
+        try:
+            MLService.refresh_predictions(db)
+        except Exception:
+            logger.exception("Startup ML prediction refresh failed")
+            db.rollback()
 
 
 def start_scheduler() -> None:
