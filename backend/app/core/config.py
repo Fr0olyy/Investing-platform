@@ -38,8 +38,13 @@ class Settings(BaseSettings):
     ML_LOOKBACK_YEARS: int = 3
     ML_TEST_RATIO: float = 0.2
     ML_MIN_DATA_POINTS: int = 120
-    ML_HORIZON_DAYS: int = 1
+    ML_HORIZON_DAYS: int = 7
+    ML_MAX_FORECAST_MOVE_PERCENT: float = 8.0
+    ML_MAX_SCENARIO_MOVE_PERCENT: float = 15.0
+    ML_MAX_DRIVER_MOVE_PERCENT: float = 3.0
+    ML_PLACEHOLDER_CONFIDENCE_SCORE: float = 0.68
     ML_AUTO_TRAIN_ON_STARTUP: bool = True
+    LIVE_QUOTE_REFRESH_SECONDS: int = 8
 
     MOEX_BASE_URL: str = "https://iss.moex.com/iss"
     CBR_BASE_URL: str = "https://www.cbr.ru"

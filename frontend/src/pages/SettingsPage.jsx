@@ -3,6 +3,9 @@ import { api } from "../api/client";
 
 export default function SettingsPage() {
   const [isLightTheme, setIsLightTheme] = useState(localStorage.getItem("theme") === "light");
+  const [showForecastOnMarketCharts, setShowForecastOnMarketCharts] = useState(
+    localStorage.getItem("showForecastOnMarketCharts") !== "false",
+  );
 
   const [oauthEmail, setOauthEmail] = useState("");
   const [oauthPassword, setOauthPassword] = useState("");
@@ -21,6 +24,13 @@ export default function SettingsPage() {
       localStorage.setItem("theme", "dark");
       document.body.classList.remove("light-theme");
     }
+  };
+
+  const toggleForecastOnMarketCharts = () => {
+    const nextValue = !showForecastOnMarketCharts;
+    setShowForecastOnMarketCharts(nextValue);
+    localStorage.setItem("showForecastOnMarketCharts", String(nextValue));
+    window.dispatchEvent(new Event("forecast-settings-changed"));
   };
 
   const handleOAuthToken = async (event) => {
@@ -53,6 +63,20 @@ export default function SettingsPage() {
           </div>
           <button type="button" className="btn-primary" onClick={toggleTheme}>
             {isLightTheme ? "Включить тёмную тему" : "Включить светлую тему"}
+          </button>
+        </div>
+      </div>
+
+      <div className="card settings-card">
+        <div className="settings-row">
+          <div>
+            <h3>Прогноз на графиках рынка</h3>
+            <p className="text-muted">
+              Можно скрыть прогнозную линию на карточках акций, если нужно смотреть только фактические свечи MOEX.
+            </p>
+          </div>
+          <button type="button" className="btn-primary" onClick={toggleForecastOnMarketCharts}>
+            {showForecastOnMarketCharts ? "Выключить прогноз" : "Включить прогноз"}
           </button>
         </div>
       </div>

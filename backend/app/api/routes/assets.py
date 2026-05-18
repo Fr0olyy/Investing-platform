@@ -2,7 +2,13 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
-from app.schemas.asset import AssetDetailsResponse, AssetListItem, CandleResponse, NewsArticleResponse
+from app.schemas.asset import (
+    AssetDetailsResponse,
+    AssetListItem,
+    CandleResponse,
+    NewsArticleResponse,
+    QuoteHistoryResponse,
+)
 from app.services.market_service import MarketService
 
 
@@ -41,6 +47,20 @@ def get_asset_candles(
     db: Session = Depends(get_db),
 ) -> list[CandleResponse]:
     return MarketService.get_candles(db, ticker=ticker, days=days)
+
+
+@router.get(
+    "/{ticker}/quotes",
+    response_model=list[QuoteHistoryResponse],
+    summary="История внутридневных котировок",
+    description="Возвращает последние снимки цены для дневного live-графика.",
+)
+def get_asset_quotes(
+    ticker: str,
+    limit: int = Query(default=240, ge=10, le=1000),
+    db: Session = Depends(get_db),
+) -> list[QuoteHistoryResponse]:
+    return MarketService.get_quote_history(db, ticker=ticker, limit=limit)
 
 
 @router.get(

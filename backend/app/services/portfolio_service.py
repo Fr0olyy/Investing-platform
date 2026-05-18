@@ -30,6 +30,7 @@ class PortfolioService:
 
     @staticmethod
     def get_summary(db: Session, user: User) -> PortfolioSummaryResponse:
+        MarketService.refresh_quotes_if_stale(db, source="portfolio-live")
         portfolio = PortfolioService.get_portfolio(db, user)
         positions = db.scalars(
             select(Position).where(Position.portfolio_id == portfolio.id).order_by(Position.created_at.asc())

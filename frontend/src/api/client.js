@@ -167,6 +167,9 @@ export const api = {
     candles(ticker, days = 30) {
       return apiClient(`/assets/${ticker}/candles?days=${days}`, { auth: false });
     },
+    quotes(ticker, limit = 240) {
+      return apiClient(`/assets/${ticker}/quotes?limit=${limit}`, { auth: false });
+    },
     news(ticker, limit = 5) {
       return apiClient(`/assets/${ticker}/news?limit=${limit}`, { auth: false });
     },
@@ -191,8 +194,8 @@ export const api = {
     },
   },
   ml: {
-    prediction(ticker) {
-      return apiClient(`/ml/predictions/${ticker}`, { auth: false });
+    prediction(ticker, horizonDays = 7) {
+      return apiClient(`/ml/predictions/${ticker}?horizon_days=${horizonDays}`, { auth: false });
     },
     model(ticker) {
       return apiClient(`/ml/models/${ticker}`, { auth: false });

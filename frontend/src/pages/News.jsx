@@ -1,7 +1,13 @@
-﻿import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, authStorage } from "../api/client";
 
 const NEWS_PER_TICKER = 10;
+const buildNewsHref = (item) => {
+  if (item?.url && item.url.startsWith("http") && !item.url.includes("example.com")) {
+    return item.url;
+  }
+  return `https://news.google.com/search?q=${encodeURIComponent(`${item?.ticker || ""} ${item?.title || ""}`)}`;
+};
 
 export default function News() {
   const [assets, setAssets] = useState([]);
@@ -15,7 +21,7 @@ export default function News() {
 
   const isAdmin = currentUser?.role === "admin";
 
-  const loadNews = async () => {
+  const loadNews = useCallback(async () => {
     setIsLoading(true);
     setError("");
 
@@ -60,11 +66,11 @@ export default function News() {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     loadNews();
-  }, []);
+  }, [loadNews]);
 
   useEffect(() => {
     let cancelled = false;
@@ -118,10 +124,23 @@ export default function News() {
     });
   }, [allNews, selectedTicker, searchText]);
 
+  const demoNewsCount = useMemo(
+    () => filteredNews.filter((item) => item.source === "Demo Feed" || item.url?.includes("example.com")).length,
+    [filteredNews],
+  );
+
+  const latestPublishedAt = filteredNews[0]?.publishedAt
+    ? new Date(filteredNews[0].publishedAt).toLocaleString("ru-RU")
+    : "—";
+
   return (
     <div className="page-content">
       <div className="page-header">
         <h1>Новости рынка</h1>
+        <p className="text-muted">
+          Лента подтягивается по тикерам из backend. Карточки открывают оригинал новости, а для demo-записей
+          автоматически подставляется поиск Google News.
+        </p>
       </div>
 
       <div className="card">
@@ -175,38 +194,60 @@ export default function News() {
       {error ? <div className="error-message">{error}</div> : null}
 
       {!isLoading && !error && (
-        <div className="news-list">
-          {filteredNews.length === 0 ? (
-            <div className="card">
-              <p className="text-muted">По выбранным фильтрам новостей не найдено.</p>
+        <>
+          <div className="stats-grid">
+            <div className="card stat-card premium-card">
+              <p className="text-muted">Новостей в выборке</p>
+              <h2>{filteredNews.length}</h2>
             </div>
-          ) : (
-            filteredNews.map((item) => (
-              <article key={item.id} className="card news-card">
-                <div className="news-meta">
-                  <span>
-                    <strong>{item.ticker}</strong> — {item.assetName}
-                  </span>
-                  <span>{new Date(item.publishedAt).toLocaleString("ru-RU")}</span>
-                </div>
+            <div className="card stat-card premium-card">
+              <p className="text-muted">Последняя публикация</p>
+              <h2>{latestPublishedAt}</h2>
+            </div>
+            <div className="card stat-card premium-card">
+              <p className="text-muted">Demo-записей</p>
+              <h2>{demoNewsCount}</h2>
+              <p className="text-muted">для них используется Google News fallback</p>
+            </div>
+          </div>
 
-                <h3>{item.title}</h3>
-                <p>{item.summary}</p>
+          <div className="news-list">
+            {filteredNews.length === 0 ? (
+              <div className="card">
+                <p className="text-muted">По выбранным фильтрам новостей не найдено.</p>
+              </div>
+            ) : (
+              filteredNews.map((item) => (
+                <a
+                  key={item.id}
+                  className="card news-card news-card-link"
+                  href={buildNewsHref(item)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  <div className="news-meta">
+                    <span>
+                      <strong>{item.ticker}</strong> — {item.assetName}
+                    </span>
+                    <span>{new Date(item.publishedAt).toLocaleString("ru-RU")}</span>
+                  </div>
 
-                <div className="news-footer">
-                  <span>Источник: {item.source}</span>
-                  <span className={`sentiment sentiment-${item.sentiment.toLowerCase()}`}>
-                    Тональность: {item.sentiment}
-                  </span>
-                </div>
+                  <h3>{item.title}</h3>
+                  <p>{item.summary}</p>
 
-                <a className="inline-link" href={item.url} target="_blank" rel="noreferrer">
-                  Открыть оригинал новости
+                  <div className="news-footer">
+                    <span>Источник: {item.source}</span>
+                    <span className={`sentiment sentiment-${item.sentiment.toLowerCase()}`}>
+                      Тональность: {item.sentiment}
+                    </span>
+                  </div>
+
+                  <span className="inline-link">Открыть новость ↗</span>
                 </a>
-              </article>
-            ))
-          )}
-        </div>
+              ))
+            )}
+          </div>
+        </>
       )}
     </div>
   );

@@ -15,7 +15,7 @@ class DriverContribution(APIModel):
 class PredictionResponse(APIModel):
     ticker: str = Field(description="Тикер актива.")
     current_price: float = Field(description="Текущая рыночная цена актива.")
-    predicted_price: float = Field(description="Расчетная цена на следующий торговый день.")
+    predicted_price: float = Field(description="Расчетная цена на выбранный горизонт прогноза.")
     impact_percent: float = Field(description="Отклонение прогноза от текущей цены в процентах.")
     confidence_score: float = Field(description="R^2 модели или fallback confidence score.")
     horizon_days: int = Field(description="Горизонт прогноза в торговых днях.")

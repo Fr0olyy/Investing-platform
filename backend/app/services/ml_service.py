@@ -85,22 +85,30 @@ class MLService:
         )
 
     @staticmethod
-    def get_prediction(db: Session, ticker: str) -> PredictionResponse:
+    def get_prediction(db: Session, ticker: str, horizon_days: int | None = None) -> PredictionResponse:
+        horizon_days = MLService._normalize_horizon(horizon_days)
         asset = MarketService.get_asset_or_404(db, ticker)
         prediction = db.scalar(
-            select(Prediction).where(Prediction.asset_id == asset.id).order_by(desc(Prediction.generated_at)).limit(1)
+            select(Prediction)
+            .where(Prediction.asset_id == asset.id, Prediction.horizon_days == horizon_days)
+            .order_by(desc(Prediction.generated_at))
+            .limit(1)
         )
         if not prediction:
-            MLService.refresh_predictions(db, tickers=[ticker])
+            MLService.refresh_predictions(db, tickers=[ticker], horizon_days=horizon_days)
             prediction = db.scalar(
-                select(Prediction).where(Prediction.asset_id == asset.id).order_by(desc(Prediction.generated_at)).limit(1)
+                select(Prediction)
+                .where(Prediction.asset_id == asset.id, Prediction.horizon_days == horizon_days)
+                .order_by(desc(Prediction.generated_at))
+                .limit(1)
             )
         if not prediction:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Prediction not available.")
         return MLService._serialize_prediction(asset, prediction)
 
     @staticmethod
-    def refresh_predictions(db: Session, tickers: list[str] | None = None) -> int:
+    def refresh_predictions(db: Session, tickers: list[str] | None = None, horizon_days: int | None = None) -> int:
+        horizon_days = MLService._normalize_horizon(horizon_days)
         assets_query = select(Asset).where(Asset.is_active.is_(True))
         if tickers:
             assets_query = assets_query.where(Asset.ticker.in_([ticker.upper() for ticker in tickers]))
@@ -120,22 +128,41 @@ class MLService:
             if metadata.status == MLModelStatus.READY and metadata.artifact_path:
                 artifact = MLService._load_artifact(metadata.artifact_path)
                 model_input = MLService._model_input_frame(artifact, current_features)
-                predicted_price = float(artifact["model"].predict(model_input)[0])
+                predicted_price = MLService._stabilize_predicted_price(
+                    base_price=float(quote.price),
+                    predicted_price=MLService._scale_prediction_to_horizon(
+                        base_price=float(quote.price),
+                        predicted_price=float(artifact["model"].predict(model_input)[0]),
+                        source_horizon_days=settings.ML_HORIZON_DAYS,
+                        target_horizon_days=horizon_days,
+                    ),
+                    max_move_percent=MLService._horizon_move_limit(settings.ML_MAX_FORECAST_MOVE_PERCENT, horizon_days),
+                )
                 drivers = MLService._build_driver_contributions(
                     feature_names=artifact["feature_names"],
                     feature_values=model_input.iloc[0].to_dict(),
                     baseline_means=artifact["baseline_means"],
                     coefficients=artifact["coefficients"],
+                    base_price=float(quote.price),
                 )
                 summary = (
-                    f"Прогноз на следующий торговый день по модели {metadata.model_name} "
-                    f"на основе MOEX/CBR/FRED данных."
+                    f"Прогноз на {horizon_days} торговых дней по модели {metadata.model_name} "
+                    f"на основе MOEX/CBR/FRED данных. Прогноз ограничен риск-коридором, чтобы не показывать "
+                    f"нереалистичные разовые скачки."
                 )
                 is_placeholder = False
-                confidence_score = float(metadata.metrics.get("r2", 0.0))
+                confidence_score = MLService._normalize_confidence(metadata.metrics.get("r2", 0.0))
             else:
-                predicted_price, drivers, confidence_score = MLService._placeholder_prediction(metadata, current_features)
-                summary = "Fallback placeholder forecast: обученная модель пока недоступна."
+                predicted_price, drivers, confidence_score = MLService._placeholder_prediction(
+                    metadata,
+                    current_features,
+                    max_move_percent=MLService._horizon_move_limit(settings.ML_MAX_FORECAST_MOVE_PERCENT, horizon_days),
+                    horizon_days=horizon_days,
+                )
+                summary = (
+                    f"Fallback-прогноз на {horizon_days} торговых дней: обученная модель пока "
+                    f"недоступна, поэтому используется осторожная нормированная макро-модель."
+                )
                 is_placeholder = True
 
             impact_percent = ((predicted_price - float(quote.price)) / float(quote.price) * 100) if float(quote.price) else 0.0
@@ -146,7 +173,7 @@ class MLService:
                     predicted_price=money(predicted_price),
                     impact_percent=money(impact_percent),
                     confidence_score=confidence_score,
-                    horizon_days=settings.ML_HORIZON_DAYS,
+                    horizon_days=horizon_days,
                     summary=summary,
                     drivers=[driver.model_dump() for driver in drivers],
                     is_placeholder=is_placeholder,
@@ -173,17 +200,27 @@ class MLService:
         if metadata.status == MLModelStatus.READY and metadata.artifact_path:
             artifact = MLService._load_artifact(metadata.artifact_path)
             model_input = MLService._model_input_frame(artifact, feature_vector)
-            predicted_price = float(artifact["model"].predict(model_input)[0])
+            predicted_price = MLService._stabilize_predicted_price(
+                base_price=float(quote.price),
+                predicted_price=float(artifact["model"].predict(model_input)[0]),
+                max_move_percent=MLService._horizon_move_limit(settings.ML_MAX_SCENARIO_MOVE_PERCENT, settings.ML_HORIZON_DAYS),
+            )
             drivers = MLService._build_driver_contributions(
                 feature_names=artifact["feature_names"],
                 feature_values=model_input.iloc[0].to_dict(),
                 baseline_means=artifact["baseline_means"],
                 coefficients=artifact["coefficients"],
+                base_price=float(quote.price),
             )
-            confidence_score = float(metadata.metrics.get("r2", 0.0))
+            confidence_score = MLService._normalize_confidence(metadata.metrics.get("r2", 0.0))
             is_placeholder = False
         else:
-            predicted_price, drivers, confidence_score = MLService._placeholder_prediction(metadata, feature_vector)
+            predicted_price, drivers, confidence_score = MLService._placeholder_prediction(
+                metadata,
+                feature_vector,
+                max_move_percent=settings.ML_MAX_SCENARIO_MOVE_PERCENT,
+                horizon_days=settings.ML_HORIZON_DAYS,
+            )
             is_placeholder = True
 
         impact_percent = ((predicted_price - float(quote.price)) / float(quote.price) * 100) if float(quote.price) else 0.0
@@ -353,13 +390,15 @@ class MLService:
         feature_values: dict[str, float],
         baseline_means: dict[str, float],
         coefficients: dict[str, float],
+        base_price: float | None = None,
     ) -> list[DriverContribution]:
         drivers: list[DriverContribution] = []
         for feature_name in feature_names:
-            contribution = coefficients.get(feature_name, 0.0) * (
+            raw_contribution = coefficients.get(feature_name, 0.0) * (
                 feature_values.get(feature_name, baseline_means.get(feature_name, 0.0))
                 - baseline_means.get(feature_name, 0.0)
             )
+            contribution = MLService._cap_driver_contribution(raw_contribution, base_price)
             drivers.append(
                 DriverContribution(
                     code=feature_name,
@@ -375,17 +414,25 @@ class MLService:
     def _placeholder_prediction(
         metadata: MLModelMetadata,
         current_features: dict[str, float],
+        max_move_percent: float,
+        horizon_days: int,
     ) -> tuple[float, list[DriverContribution], float]:
         baseline = metadata.model_params.get("baseline", {})
         weights = metadata.model_params.get("weights", {})
         base_price = current_features.get("PREV_CLOSE", 0.0)
-        total_shift = 0.0
+        total_shift_percent = 0.0
         drivers: list[DriverContribution] = []
         for code, weight in weights.items():
             baseline_value = float(baseline.get(code, current_features.get(code, 0.0)))
             current_value = float(current_features.get(code, baseline_value))
-            contribution = (current_value - baseline_value) * float(weight)
-            total_shift += contribution
+            relative_change = ((current_value - baseline_value) / baseline_value) if baseline_value else 0.0
+            contribution_percent = relative_change * float(weight) * 100 * max(1.0, horizon_days / settings.ML_HORIZON_DAYS)
+            contribution_percent = max(
+                -settings.ML_MAX_DRIVER_MOVE_PERCENT,
+                min(settings.ML_MAX_DRIVER_MOVE_PERCENT, contribution_percent),
+            )
+            total_shift_percent += contribution_percent
+            contribution = float(base_price) * contribution_percent / 100
             drivers.append(
                 DriverContribution(
                     code=code,
@@ -395,7 +442,67 @@ class MLService:
                 )
             )
         drivers.sort(key=lambda item: abs(item.contribution), reverse=True)
-        return base_price + total_shift, drivers, float(metadata.metrics.get("r2", 0.0))
+        total_shift_percent = max(
+            -max_move_percent,
+            min(max_move_percent, total_shift_percent),
+        )
+        predicted_price = float(base_price) * (1 + total_shift_percent / 100)
+        confidence = MLService._normalize_confidence(
+            metadata.metrics.get("r2", settings.ML_PLACEHOLDER_CONFIDENCE_SCORE)
+        )
+        return predicted_price, drivers, confidence
+
+    @staticmethod
+    def _stabilize_predicted_price(base_price: float, predicted_price: float, max_move_percent: float) -> float:
+        if base_price <= 0:
+            return max(0.01, predicted_price)
+        lower_bound = base_price * (1 - max_move_percent / 100)
+        upper_bound = base_price * (1 + max_move_percent / 100)
+        return max(lower_bound, min(upper_bound, predicted_price))
+
+    @staticmethod
+    def _scale_prediction_to_horizon(
+        base_price: float,
+        predicted_price: float,
+        source_horizon_days: int,
+        target_horizon_days: int,
+    ) -> float:
+        if base_price <= 0 or source_horizon_days <= 0:
+            return predicted_price
+        scale = max(0.1, target_horizon_days / source_horizon_days)
+        return base_price + (predicted_price - base_price) * scale
+
+    @staticmethod
+    def _horizon_move_limit(base_limit_percent: float, horizon_days: int) -> float:
+        scale = max(1.0, (horizon_days / settings.ML_HORIZON_DAYS) ** 0.5)
+        return min(30.0, base_limit_percent * scale)
+
+    @staticmethod
+    def _normalize_horizon(horizon_days: int | None) -> int:
+        try:
+            value = int(horizon_days or settings.ML_HORIZON_DAYS)
+        except (TypeError, ValueError):
+            value = settings.ML_HORIZON_DAYS
+        return max(1, min(180, value))
+
+    @staticmethod
+    def _cap_driver_contribution(contribution: float, base_price: float | None) -> float:
+        if not base_price or base_price <= 0:
+            return contribution
+        limit = base_price * settings.ML_MAX_DRIVER_MOVE_PERCENT / 100
+        return max(-limit, min(limit, contribution))
+
+    @staticmethod
+    def _normalize_confidence(value: Any) -> float:
+        try:
+            confidence = float(value)
+        except (TypeError, ValueError):
+            confidence = settings.ML_PLACEHOLDER_CONFIDENCE_SCORE
+        if confidence < 0:
+            confidence = settings.ML_PLACEHOLDER_CONFIDENCE_SCORE
+        if confidence > 1:
+            confidence = confidence / 100
+        return max(0.0, min(0.95, confidence))
 
     @staticmethod
     def _load_artifact(path: str) -> dict[str, Any]:

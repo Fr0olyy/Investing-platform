@@ -12,7 +12,14 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.db.models import Asset, Candle, MacroIndicatorSnapshot, NewsArticle, Prediction, Quote
 from app.integrations.market_data_client import ExternalDataError, MarketDataClient
-from app.schemas.asset import AssetDetailsResponse, AssetListItem, CandleResponse, NewsArticleResponse, QuoteSnapshot
+from app.schemas.asset import (
+    AssetDetailsResponse,
+    AssetListItem,
+    CandleResponse,
+    NewsArticleResponse,
+    QuoteHistoryResponse,
+    QuoteSnapshot,
+)
 from app.schemas.ml import DriverContribution, PredictionResponse
 
 logger = logging.getLogger(__name__)
@@ -32,7 +39,14 @@ class MarketService:
 
     @staticmethod
     def get_latest_quote(db: Session, asset_id: str) -> Quote:
-        quote = db.scalar(select(Quote).where(Quote.asset_id == asset_id).order_by(desc(Quote.recorded_at)).limit(1))
+        quote = db.scalar(
+            select(Quote)
+            .where(Quote.asset_id == asset_id, Quote.source != "seed")
+            .order_by(desc(Quote.recorded_at))
+            .limit(1)
+        )
+        if not quote:
+            quote = db.scalar(select(Quote).where(Quote.asset_id == asset_id).order_by(desc(Quote.recorded_at)).limit(1))
         if not quote:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Quote not found.")
         return quote
@@ -40,11 +54,15 @@ class MarketService:
     @staticmethod
     def get_latest_prediction(db: Session, asset_id: str) -> Prediction | None:
         return db.scalar(
-            select(Prediction).where(Prediction.asset_id == asset_id).order_by(desc(Prediction.generated_at)).limit(1)
+            select(Prediction)
+            .where(Prediction.asset_id == asset_id, Prediction.horizon_days == settings.ML_HORIZON_DAYS)
+            .order_by(desc(Prediction.generated_at))
+            .limit(1)
         )
 
     @staticmethod
     def list_assets(db: Session) -> list[AssetListItem]:
+        MarketService.refresh_quotes_if_stale(db, source="asset-list-live")
         assets = db.scalars(select(Asset).where(Asset.is_active.is_(True)).order_by(Asset.ticker)).all()
         items: list[AssetListItem] = []
         for asset in assets:
@@ -68,6 +86,7 @@ class MarketService:
 
     @staticmethod
     def get_asset_details(db: Session, ticker: str) -> AssetDetailsResponse:
+        MarketService.refresh_quotes_if_stale(db, source="asset-details-live")
         asset = MarketService.get_asset_or_404(db, ticker)
         quote = MarketService.get_latest_quote(db, asset.id)
         prediction = MarketService.get_latest_prediction(db, asset.id)
@@ -87,6 +106,7 @@ class MarketService:
 
     @staticmethod
     def get_candles(db: Session, ticker: str, days: int) -> list[CandleResponse]:
+        MarketService.refresh_quotes_if_stale(db, source="candles-live")
         asset = MarketService.get_asset_or_404(db, ticker)
         from_date = datetime.now() - timedelta(days=days)
         candles = db.scalars(
@@ -95,6 +115,26 @@ class MarketService:
             .order_by(Candle.timestamp.asc())
         ).all()
         return [CandleResponse.model_validate(candle) for candle in candles]
+
+    @staticmethod
+    def get_quote_history(db: Session, ticker: str, limit: int) -> list[QuoteHistoryResponse]:
+        MarketService.refresh_quotes_if_stale(db, source="quote-history-live")
+        asset = MarketService.get_asset_or_404(db, ticker)
+        quotes = db.scalars(
+            select(Quote)
+            .where(Quote.asset_id == asset.id, Quote.source != "seed")
+            .order_by(desc(Quote.recorded_at))
+            .limit(limit)
+        ).all()
+        if not quotes:
+            quotes = db.scalars(
+                select(Quote)
+                .where(Quote.asset_id == asset.id)
+                .order_by(desc(Quote.recorded_at))
+                .limit(limit)
+            ).all()
+        quotes = list(reversed(quotes))
+        return [QuoteHistoryResponse.model_validate(quote) for quote in quotes]
 
     @staticmethod
     def get_news(db: Session, ticker: str, limit: int) -> list[NewsArticleResponse]:
@@ -143,6 +183,32 @@ class MarketService:
                 return MarketService._refresh_market_snapshot_real(db, client, source)
         except Exception:
             logger.exception("Real market refresh failed")
+            db.rollback()
+            return 0
+
+    @staticmethod
+    def refresh_quotes_if_stale(db: Session, source: str = "live") -> int:
+        refresh_seconds = max(0, settings.LIVE_QUOTE_REFRESH_SECONDS)
+        if refresh_seconds == 0:
+            return 0
+
+        latest_quote = db.scalar(
+            select(Quote)
+            .where(Quote.source != "seed")
+            .order_by(desc(Quote.recorded_at))
+            .limit(1)
+        )
+        if latest_quote and datetime.now() - latest_quote.recorded_at < timedelta(seconds=refresh_seconds):
+            return 0
+
+        if settings.MARKET_DATA_PROVIDER.lower() == "mock":
+            return MarketService._refresh_latest_quotes_mock(db, source)
+
+        try:
+            with MarketDataClient() as client:
+                return MarketService._refresh_latest_quotes_real(db, client, source)
+        except Exception:
+            logger.exception("Live quote refresh failed")
             db.rollback()
             return 0
 
@@ -226,6 +292,99 @@ class MarketService:
                 logger.exception("Real macro indicator refresh failed")
 
         return updated
+
+    @staticmethod
+    def _refresh_latest_quotes_real(db: Session, client: MarketDataClient, source: str) -> int:
+        assets = db.scalars(select(Asset).where(Asset.is_active.is_(True)).order_by(Asset.ticker)).all()
+        updated = 0
+        for asset in assets:
+            try:
+                snapshot = client.fetch_share_snapshot(asset.ticker, board=asset.board)
+                asset.name = snapshot["name"] or asset.name
+                asset.lot_size = snapshot["lot_size"] or asset.lot_size
+                quote = Quote(
+                    asset_id=asset.id,
+                    price=money(snapshot["price"]),
+                    open=money(snapshot["open"]),
+                    high=money(snapshot["high"]),
+                    low=money(snapshot["low"]),
+                    close=money(snapshot["close"]),
+                    prev_close=money(snapshot["prev_close"]),
+                    change_percent=money(snapshot["change_percent"]),
+                    volume=int(snapshot["volume"]),
+                    source=snapshot["source"] or source,
+                    recorded_at=snapshot["recorded_at"],
+                )
+                latest_quote = db.scalar(
+                    select(Quote)
+                    .where(Quote.asset_id == asset.id, Quote.source != "seed")
+                    .order_by(desc(Quote.recorded_at))
+                    .limit(1)
+                )
+                if MarketService._is_duplicate_quote_snapshot(latest_quote, quote):
+                    continue
+                db.add(quote)
+                MarketService._upsert_today_candle(
+                    db=db,
+                    asset_id=asset.id,
+                    open_price=quote.open,
+                    high_price=quote.high,
+                    low_price=quote.low,
+                    close_price=quote.close,
+                    volume=quote.volume,
+                )
+                db.commit()
+                updated += 1
+            except Exception:
+                db.rollback()
+                logger.exception("Live quote refresh failed for %s", asset.ticker)
+
+        return updated
+
+    @staticmethod
+    def _is_duplicate_quote_snapshot(previous_quote: Quote | None, current_quote: Quote) -> bool:
+        if not previous_quote:
+            return False
+        return (
+            money(previous_quote.price) == money(current_quote.price)
+            and money(previous_quote.change_percent) == money(current_quote.change_percent)
+        )
+
+    @staticmethod
+    def _upsert_today_candle(
+        db: Session,
+        asset_id: str,
+        open_price: Decimal | float,
+        high_price: Decimal | float,
+        low_price: Decimal | float,
+        close_price: Decimal | float,
+        volume: int,
+    ) -> None:
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        candle = db.scalar(
+            select(Candle)
+            .where(Candle.asset_id == asset_id, Candle.interval == "1d", Candle.timestamp == today)
+            .limit(1)
+        )
+        if candle:
+            candle.open = money(open_price)
+            candle.high = money(max(Decimal(str(candle.high)), Decimal(str(high_price))))
+            candle.low = money(min(Decimal(str(candle.low)), Decimal(str(low_price))))
+            candle.close = money(close_price)
+            candle.volume = max(int(candle.volume or 0), int(volume or 0))
+        else:
+            db.add(
+                Candle(
+                    asset_id=asset_id,
+                    interval="1d",
+                    open=money(open_price),
+                    high=money(high_price),
+                    low=money(low_price),
+                    close=money(close_price),
+                    volume=int(volume or 0),
+                    timestamp=today,
+                )
+            )
 
     @staticmethod
     def _upsert_candles_from_frame(db: Session, asset_id: str, frame) -> None:
@@ -328,6 +487,45 @@ class MarketService:
                     source=source,
                 )
             )
+
+        db.commit()
+        return updated
+
+    @staticmethod
+    def _refresh_latest_quotes_mock(db: Session, source: str) -> int:
+        assets = db.scalars(select(Asset).where(Asset.is_active.is_(True))).all()
+        updated = 0
+        for asset in assets:
+            previous_quote = MarketService.get_latest_quote(db, asset.id)
+            delta = Decimal(str(uniform(-0.0025, 0.0025)))
+            new_price = money(Decimal(str(previous_quote.price)) * (Decimal("1") + delta))
+            prev_close = money(previous_quote.prev_close or previous_quote.close)
+            high = money(max(new_price, Decimal(str(previous_quote.high))) * Decimal("1.001"))
+            low = money(min(new_price, Decimal(str(previous_quote.low))) * Decimal("0.999"))
+            change_percent = money(((new_price - prev_close) / prev_close) * Decimal("100")) if prev_close else Decimal("0")
+            quote = Quote(
+                asset_id=asset.id,
+                price=new_price,
+                open=money(previous_quote.open),
+                high=high,
+                low=low,
+                close=new_price,
+                prev_close=prev_close,
+                change_percent=change_percent,
+                volume=max(1, int(previous_quote.volume * (1 + uniform(-0.015, 0.025)))),
+                source=source,
+            )
+            db.add(quote)
+            MarketService._upsert_today_candle(
+                db=db,
+                asset_id=asset.id,
+                open_price=quote.open,
+                high_price=quote.high,
+                low_price=quote.low,
+                close_price=quote.close,
+                volume=quote.volume,
+            )
+            updated += 1
 
         db.commit()
         return updated

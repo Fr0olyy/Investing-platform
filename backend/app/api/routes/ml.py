@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -15,8 +15,12 @@ router = APIRouter(prefix="/ml", tags=["ML Sandbox"])
     summary="Получить прогноз по активу",
     description="Возвращает последний кэшированный прогноз цены по выбранному инструменту.",
 )
-def get_prediction(ticker: str, db: Session = Depends(get_db)) -> PredictionResponse:
-    return MLService.get_prediction(db, ticker)
+def get_prediction(
+    ticker: str,
+    horizon_days: int = Query(default=7, ge=1, le=180, description="Горизонт прогноза в торговых днях."),
+    db: Session = Depends(get_db),
+) -> PredictionResponse:
+    return MLService.get_prediction(db, ticker, horizon_days=horizon_days)
 
 
 @router.get(

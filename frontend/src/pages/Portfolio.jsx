@@ -14,8 +14,8 @@ export default function Portfolio() {
   useEffect(() => {
     let cancelled = false;
 
-    const load = async () => {
-      setIsLoading(true);
+    const load = async ({ silent = false } = {}) => {
+      if (!silent) setIsLoading(true);
       setError("");
 
       try {
@@ -32,13 +32,18 @@ export default function Portfolio() {
       } catch (err) {
         if (!cancelled) setError(err.message);
       } finally {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled && !silent) setIsLoading(false);
       }
     };
 
     load();
+    const timer = window.setInterval(() => {
+      load({ silent: true }).catch(() => undefined);
+    }, 8000);
+
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
   }, []);
 
@@ -98,8 +103,16 @@ export default function Portfolio() {
             <tbody>
               {positions.map((position) => (
                 <tr key={position.ticker}>
-                  <td className="ticker">{position.ticker}</td>
-                  <td>{position.name}</td>
+                  <td className="ticker">
+                    <Link to={`/market?ticker=${encodeURIComponent(position.ticker)}`} className="inline-link">
+                      {position.ticker}
+                    </Link>
+                  </td>
+                  <td>
+                    <Link to={`/market?ticker=${encodeURIComponent(position.ticker)}`} className="inline-link">
+                      {position.name}
+                    </Link>
+                  </td>
                   <td>{position.quantity}</td>
                   <td>{formatMoney(position.average_price)}</td>
                   <td>{formatMoney(position.current_price)}</td>

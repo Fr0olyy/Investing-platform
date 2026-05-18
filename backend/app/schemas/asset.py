@@ -54,6 +54,14 @@ class CandleResponse(APIModel):
     volume: int
 
 
+class QuoteHistoryResponse(APIModel):
+    price: float
+    change_percent: float
+    volume: int
+    recorded_at: datetime
+    source: str
+
+
 class NewsArticleResponse(APIModel):
     title: str
     summary: str

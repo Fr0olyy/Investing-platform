@@ -35,7 +35,7 @@ const buildFlatCandles = (cashValue) => {
   return candles;
 };
 
-const buildPortfolioCandles = (summary, trades, candlesByTicker) => {
+const buildPortfolioCandles = (summary, trades, candlesByTicker, rangeDays = 30) => {
   if (!summary) return [];
 
   const cashNow = Number(summary.cash_balance || 0);
@@ -63,7 +63,7 @@ const buildPortfolioCandles = (summary, trades, candlesByTicker) => {
   });
 
   const sortedDates = Array.from(allDateKeys).sort();
-  const targetDates = sortedDates.slice(-30);
+  const targetDates = sortedDates.slice(-rangeDays);
 
   if (targetDates.length === 0) {
     return buildFlatCandles(cashNow);
@@ -185,17 +185,18 @@ function PortfolioCandleChart({ data }) {
 
   if (!data.length) return null;
 
-  const minPrice = Math.min(...data.map((item) => item.low));
-  const maxPrice = Math.max(...data.map((item) => item.high));
+  const values = data.map((item) => item.close);
+  const minPrice = Math.min(...values);
+  const maxPrice = Math.max(...values);
   const spread = Math.max(maxPrice - minPrice, 1);
   const paddedMin = minPrice - spread * 0.06;
   const paddedMax = maxPrice + spread * 0.06;
 
   const y = (price) => margin.top + ((paddedMax - price) / (paddedMax - paddedMin)) * innerHeight;
-
-  const step = innerWidth / data.length;
-  const candleBodyWidth = Math.max(4, step * 0.56);
+  const x = (index) => margin.left + (data.length === 1 ? innerWidth / 2 : (innerWidth * index) / (data.length - 1));
   const xLabelStep = Math.max(1, Math.ceil(data.length / 7));
+  const points = data.map((item, index) => `${x(index)},${y(item.close)}`).join(" ");
+  const areaPoints = `${margin.left},${height - margin.bottom} ${points} ${width - margin.right},${height - margin.bottom}`;
 
   const gridLines = Array.from({ length: 5 }, (_, index) => {
     const value = paddedMax - ((paddedMax - paddedMin) * index) / 4;
@@ -207,7 +208,17 @@ function PortfolioCandleChart({ data }) {
 
   return (
     <div className="portfolio-candle-wrapper">
-      <svg viewBox={`0 0 ${width} ${height}`} className="portfolio-candle-svg" role="img" aria-label="Свечной график средств портфеля">
+      <svg viewBox={`0 0 ${width} ${height}`} className="portfolio-candle-svg" role="img" aria-label="Линейный график стоимости портфеля">
+        <defs>
+          <linearGradient id="portfolioLineGradient" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0" stopColor="#38bdf8" />
+            <stop offset="1" stopColor="#22c55e" />
+          </linearGradient>
+          <linearGradient id="portfolioAreaGradient" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0" stopColor="#38bdf8" stopOpacity="0.22" />
+            <stop offset="1" stopColor="#38bdf8" stopOpacity="0" />
+          </linearGradient>
+        </defs>
         {gridLines.map((line) => (
           <g key={line.value}>
             <line
@@ -223,35 +234,15 @@ function PortfolioCandleChart({ data }) {
           </g>
         ))}
 
-        {data.map((item, index) => {
-          const centerX = margin.left + step * index + step / 2;
-          const openY = y(item.open);
-          const closeY = y(item.close);
-          const highY = y(item.high);
-          const lowY = y(item.low);
-          const bodyY = Math.min(openY, closeY);
-          const bodyHeight = Math.max(1.5, Math.abs(openY - closeY));
-          const up = item.close >= item.open;
+        <polygon points={areaPoints} fill="url(#portfolioAreaGradient)" />
+        <polyline points={points} fill="none" stroke="url(#portfolioLineGradient)" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
 
+        {data.map((item, index) => {
           return (
             <g key={`${item.date}-${index}`}>
-              <line
-                x1={centerX}
-                x2={centerX}
-                y1={highY}
-                y2={lowY}
-                className={up ? "candle-wick-up" : "candle-wick-down"}
-              />
-              <rect
-                x={centerX - candleBodyWidth / 2}
-                y={bodyY}
-                width={candleBodyWidth}
-                height={bodyHeight}
-                rx={1.5}
-                className={up ? "candle-body-up" : "candle-body-down"}
-              />
+              <circle cx={x(index)} cy={y(item.close)} r={index === data.length - 1 ? 5 : 3} className="portfolio-line-point" />
               {index % xLabelStep === 0 || index === data.length - 1 ? (
-                <text x={centerX} y={height - 16} textAnchor="middle" className="candle-x-label">
+                <text x={x(index)} y={height - 16} textAnchor="middle" className="candle-x-label">
                   {formatDateLabel(item.date)}
                 </text>
               ) : null}
@@ -261,7 +252,7 @@ function PortfolioCandleChart({ data }) {
       </svg>
 
       <p className="candle-legend">
-        <span className="legend-up">Рост</span> / <span className="legend-down">Падение</span>
+        Линия показывает итоговую стоимость портфеля: чем выше точка, тем больше стоимость средств.
       </p>
     </div>
   );
@@ -273,6 +264,7 @@ export default function Dashboard() {
   const [health, setHealth] = useState(null);
   const [portfolioTrades, setPortfolioTrades] = useState([]);
   const [tickerCandles, setTickerCandles] = useState({});
+  const [dashboardRangeDays, setDashboardRangeDays] = useState(30);
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(true);
 
@@ -281,8 +273,8 @@ export default function Dashboard() {
   useEffect(() => {
     let cancelled = false;
 
-    const load = async () => {
-      setIsLoading(true);
+    const load = async ({ silent = false } = {}) => {
+      if (!silent) setIsLoading(true);
       setError("");
 
       try {
@@ -311,7 +303,7 @@ export default function Dashboard() {
           const candleEntries = await Promise.all(
             tickers.map(async (ticker) => {
               try {
-                const candles = await api.assets.candles(ticker, 60);
+                const candles = await api.assets.candles(ticker, 180);
                 return [ticker, Array.isArray(candles) ? candles : []];
               } catch {
                 return [ticker, []];
@@ -332,14 +324,18 @@ export default function Dashboard() {
       } catch (err) {
         if (!cancelled) setError(err.message);
       } finally {
-        if (!cancelled) setIsLoading(false);
+        if (!cancelled && !silent) setIsLoading(false);
       }
     };
 
     load();
+    const timer = window.setInterval(() => {
+      load({ silent: true }).catch(() => undefined);
+    }, 8000);
 
     return () => {
       cancelled = true;
+      window.clearInterval(timer);
     };
   }, [token]);
 
@@ -350,8 +346,8 @@ export default function Dashboard() {
   }, [assets]);
 
   const portfolioCandles = useMemo(() => {
-    return buildPortfolioCandles(summary, portfolioTrades, tickerCandles);
-  }, [summary, portfolioTrades, tickerCandles]);
+    return buildPortfolioCandles(summary, portfolioTrades, tickerCandles, dashboardRangeDays);
+  }, [summary, portfolioTrades, tickerCandles, dashboardRangeDays]);
 
   return (
     <div className="page-content">
@@ -393,7 +389,24 @@ export default function Dashboard() {
 
           <div className="dashboard-grid">
             <div className="card">
-              <h3>Как ведут себя наши средства</h3>
+              <div className="section-heading-row">
+                <div>
+                  <h3>Как ведут себя наши средства</h3>
+                  <p className="text-muted">Понятная линия стоимости портфеля за выбранный период.</p>
+                </div>
+                <div className="range-switcher" aria-label="Период графика портфеля">
+                  {[7, 30, 90, 180].map((days) => (
+                    <button
+                      type="button"
+                      key={days}
+                      className={dashboardRangeDays === days ? "range-button active" : "range-button"}
+                      onClick={() => setDashboardRangeDays(days)}
+                    >
+                      {days}д
+                    </button>
+                  ))}
+                </div>
+              </div>
               {!summary ? (
                 <p className="text-muted mt-4">Войдите в аккаунт, чтобы увидеть динамику средств.</p>
               ) : portfolioCandles.length === 0 ? (
@@ -412,7 +425,9 @@ export default function Dashboard() {
                   {topMovers.map((asset) => (
                     <li key={asset.ticker}>
                       <span>
-                        <strong>{asset.ticker}</strong> {asset.name}
+                        <Link to={`/market?ticker=${encodeURIComponent(asset.ticker)}`} className="inline-link">
+                          <strong>{asset.ticker}</strong> {asset.name}
+                        </Link>
                       </span>
                       <span className={asset.change_percent >= 0 ? "text-green" : "text-red"}>
                         {asset.change_percent >= 0 ? "+" : ""}
