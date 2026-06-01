@@ -218,7 +218,7 @@ a {
 
 .stats-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
   gap: 16px;
 }
 
@@ -1110,21 +1110,6 @@ body.light-theme .tab-button.active {
   position: sticky;
   top: 16px;
   z-index: 3;
-}
-
-.ml-model-badge {
-  display: grid;
-  gap: 4px;
-  min-width: 220px;
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 12px;
-  background: rgba(148, 163, 184, 0.08);
-}
-
-.ml-model-badge span {
-  color: var(--text-muted);
-  font-size: 0.86rem;
 }
 
 .skeleton-stack {

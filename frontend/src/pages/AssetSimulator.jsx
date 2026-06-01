@@ -265,10 +265,6 @@ export default function AssetSimulator() {
                   ))}
                 </select>
               </div>
-              <div className="ml-model-badge">
-                <span>{modelMeta?.model_name || "Модель не выбрана"}</span>
-                <strong>{modelMeta?.status || "—"}</strong>
-              </div>
             </div>
             <div className="forecast-control-row">
               <span className="text-muted">Горизонт прогноза:</span>
@@ -321,7 +317,7 @@ export default function AssetSimulator() {
                   Факт строится по свечам, базовый прогноз и сценарий вынесены в будущую точку на горизонт модели.
                 </p>
               </div>
-              <span className="market-pill up">generated {formatDateTime(prediction?.generated_at)}</span>
+              <span className="market-pill up">Обновлено {formatDateTime(prediction?.generated_at)}</span>
             </div>
             <div className="chart-panel large">
               <ResponsiveContainer width="100%" height="100%">

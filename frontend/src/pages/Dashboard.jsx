@@ -261,7 +261,6 @@ function PortfolioCandleChart({ data }) {
 export default function Dashboard() {
   const [summary, setSummary] = useState(null);
   const [assets, setAssets] = useState([]);
-  const [health, setHealth] = useState(null);
   const [portfolioTrades, setPortfolioTrades] = useState([]);
   const [tickerCandles, setTickerCandles] = useState({});
   const [dashboardRangeDays, setDashboardRangeDays] = useState(30);
@@ -278,12 +277,10 @@ export default function Dashboard() {
       setError("");
 
       try {
-        const healthPayload = await api.system.health();
         const assetsPayload = await api.assets.list();
 
         if (!cancelled) {
           setAssets(Array.isArray(assetsPayload) ? assetsPayload : []);
-          setHealth(healthPayload);
         }
 
         if (token) {
@@ -362,12 +359,6 @@ export default function Dashboard() {
       ) : (
         <>
           <div className="stats-grid">
-            <div className="card stat-card">
-              <p className="text-muted">Состояние API</p>
-              <h2>{health?.status === "ok" ? "Работает" : "Неизвестно"}</h2>
-              <p className="text-muted">База данных: {health?.database || "нет данных"}</p>
-            </div>
-
             <div className="card stat-card">
               <p className="text-muted">Доступные активы</p>
               <h2>{assets.length}</h2>
