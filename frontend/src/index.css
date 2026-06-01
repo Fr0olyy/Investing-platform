@@ -449,6 +449,14 @@ textarea {
   padding: 10px 12px;
 }
 
+.success-message {
+  background-color: color-mix(in srgb, var(--green) 16%, transparent);
+  border: 1px solid color-mix(in srgb, var(--green) 60%, transparent);
+  color: var(--text-main);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
 .profile-card {
   display: flex;
   flex-direction: column;
@@ -1127,6 +1135,40 @@ body.light-theme .tab-button.active {
   font-size: 0.86rem;
 }
 
+.admin-health-grid,
+.admin-action-grid {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.admin-health-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.admin-health-grid div {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 16px;
+  background: rgba(148, 163, 184, 0.08);
+}
+
+.admin-health-grid span {
+  color: var(--text-muted);
+}
+
+.admin-action-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.admin-user-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .skeleton-stack {
   display: grid;
   gap: 12px;
@@ -1248,7 +1290,9 @@ body.light-theme .tab-button.active {
   }
 
   .forecast-kpi-grid,
-  .driver-bar-row {
+  .driver-bar-row,
+  .admin-health-grid,
+  .admin-action-grid {
     grid-template-columns: 1fr;
   }
 

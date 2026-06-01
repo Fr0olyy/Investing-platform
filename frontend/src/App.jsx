@@ -11,6 +11,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import AssetSimulator from "./pages/AssetSimulator";
 import SettingsPage from "./pages/SettingsPage";
+import AdminPanel from "./pages/AdminPanel";
 import "./App.css";
 
 function App() {
@@ -51,6 +52,14 @@ function App() {
           />
           <Route path="ml" element={<AssetSimulator />} />
           <Route path="settings" element={<SettingsPage />} />
+          <Route
+            path="admin"
+            element={
+              <RequireAuth>
+                <AdminPanel />
+              </RequireAuth>
+            }
+          />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

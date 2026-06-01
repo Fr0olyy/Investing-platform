@@ -40,7 +40,7 @@ class NewsSnapshot:
 class MarketDataClient:
     def __init__(self) -> None:
         self._client = httpx.Client(
-            timeout=httpx.Timeout(12.0, connect=5.0),
+            timeout=httpx.Timeout(8.0, connect=3.0),
             follow_redirects=True,
             headers={"User-Agent": "InvestingPlatformBackend/1.0"},
         )

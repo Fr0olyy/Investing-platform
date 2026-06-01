@@ -20,7 +20,14 @@ const DEFAULT_FACTORS = {
   RGBI: "109.3",
 };
 
-const DEFAULT_FEATURES = ["PREV_CLOSE", "BRENT", "USD_RUB", "IMOEX", "KEY_RATE", "RGBI"];
+const FACTOR_LABELS = {
+  PREV_CLOSE: "Текущая цена",
+  BRENT: "Нефть Brent",
+  USD_RUB: "Курс USD/RUB",
+  IMOEX: "Индекс МосБиржи",
+  KEY_RATE: "Ключевая ставка",
+  RGBI: "Гособлигации",
+};
 const formatNumber = (value, digits = 2) => Number(value || 0).toFixed(digits);
 const formatMoney = (value) => `${Number(value || 0).toLocaleString("ru-RU", { maximumFractionDigits: 2 })} ₽`;
 const parseFactorValue = (value) => Number(String(value).replace(",", "."));
@@ -44,6 +51,13 @@ const getAccuracyPercent = (score) => {
   const value = Number(score || 0);
   return value <= 1 ? value * 100 : value;
 };
+const getReliability = (score) => {
+  const value = getAccuracyPercent(score);
+  if (value <= 0) return { label: "Базовая", percent: 45 };
+  if (value < 55) return { label: "Базовая", percent: Math.max(35, value) };
+  if (value < 78) return { label: "Средняя", percent: value };
+  return { label: "Высокая", percent: Math.min(95, value) };
+};
 
 export default function AssetSimulator() {
   const [assets, setAssets] = useState([]);
@@ -59,14 +73,11 @@ export default function AssetSimulator() {
 
   const [isLoading, setIsLoading] = useState(true);
   const [isScenarioLoading, setIsScenarioLoading] = useState(false);
-  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState("");
 
   const selectedAsset = useMemo(() => assets.find((asset) => asset.ticker === ticker), [assets, ticker]);
-  const features = modelMeta?.feature_names?.length ? modelMeta.feature_names : DEFAULT_FEATURES;
-  const accuracy = getAccuracyPercent(prediction?.confidence_score);
+  const reliability = getReliability(prediction?.confidence_score);
   const forecastDate = addDays(prediction?.generated_at, prediction?.horizon_days || 1);
-  const metrics = modelMeta?.metrics && typeof modelMeta.metrics === "object" ? Object.entries(modelMeta.metrics) : [];
 
   const forecastChartData = useMemo(() => {
     const history = candles.slice(-35).map((candle) => ({
@@ -110,10 +121,9 @@ export default function AssetSimulator() {
         const prevClose = Number(prevRow?.close || candle.open || candle.close);
         return {
           date: formatDate(candle.timestamp),
-          prevClose,
-          close: Number(candle.close || 0),
+          price: Number(candle.close || 0),
           volume: Number(candle.volume || 0),
-          target: Number(candle.close || 0) - prevClose,
+          change: Number(candle.close || 0) - prevClose,
         };
       }),
     [candles],
@@ -123,6 +133,7 @@ export default function AssetSimulator() {
     const drivers = prediction?.drivers?.length ? prediction.drivers : [];
     return drivers.map((driver) => ({
       code: driver.code,
+      label: FACTOR_LABELS[driver.code] || driver.name || driver.code,
       contribution: Number(driver.contribution || 0),
       absContribution: Math.abs(Number(driver.contribution || 0)),
       direction: driver.direction,
@@ -215,41 +226,24 @@ export default function AssetSimulator() {
     }
   };
 
-  const refreshPredictions = async () => {
-    setIsRefreshing(true);
-    setError("");
-
-    try {
-      await api.system.refreshPredictions();
-      await loadForTicker(ticker);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setIsRefreshing(false);
-    }
-  };
-
   return (
     <div className="page-content ml-page">
       <div className="page-header hero-header animated-surface">
         <div>
-          <p className="eyebrow">Explainable AI forecast</p>
-          <h1>ML-анализ актива</h1>
+          <p className="eyebrow">Smart forecast</p>
+          <h1>Прогноз цены</h1>
           <p className="text-muted">
-            Здесь видно, на какой срок сделан прогноз, какая confidence-точность у модели,
-            какие признаки использовались и на каких свечах строится датасет.
+            Выберите акцию, горизонт и посмотрите понятный ориентир цены: история,
+            прогноз, надёжность расчёта и основные рыночные факторы.
           </p>
         </div>
-        <button type="button" className="btn-secondary glow-button" onClick={refreshPredictions} disabled={isRefreshing}>
-          {isRefreshing ? "Обновляем..." : "Пересчитать прогнозы"}
-        </button>
       </div>
 
       {error && <div className="error-message">{error}</div>}
 
       {isLoading ? (
         <div className="card">
-          <p className="text-muted">Загрузка данных ML...</p>
+          <p className="text-muted">Загрузка прогноза...</p>
         </div>
       ) : (
         <>
@@ -266,13 +260,13 @@ export default function AssetSimulator() {
                 </select>
               </div>
               <div className="ml-model-badge">
-                <span>{modelMeta?.model_name || "Модель не выбрана"}</span>
-                <strong>{modelMeta?.status || "—"}</strong>
+                <span>Режим</span>
+                <strong>{modelMeta?.status === "READY" ? "Расширенный прогноз" : "Базовый прогноз"}</strong>
               </div>
             </div>
             <div className="forecast-control-row">
               <span className="text-muted">Горизонт прогноза:</span>
-              <div className="range-switcher" aria-label="Горизонт ML-прогноза">
+              <div className="range-switcher" aria-label="Горизонт прогноза">
                 {[1, 7, 14, 30, 60, 90, 180].map((days) => (
                   <button
                     type="button"
@@ -295,7 +289,7 @@ export default function AssetSimulator() {
             </div>
 
             <div className="card stat-card premium-card">
-              <p className="text-muted">Прогнозная цена</p>
+              <p className="text-muted">Ожидаемая цена</p>
               <h2>{prediction ? formatMoney(prediction.predicted_price) : "Нет данных"}</h2>
               <p className={prediction?.impact_percent >= 0 ? "text-green" : "text-red"}>
                 {prediction ? `${prediction.impact_percent >= 0 ? "+" : ""}${formatNumber(prediction.impact_percent)}%` : "-"}
@@ -303,13 +297,13 @@ export default function AssetSimulator() {
             </div>
 
             <div className="card stat-card premium-card">
-              <p className="text-muted">Горизонт и точность</p>
+              <p className="text-muted">Срок и надёжность</p>
               <h2>{prediction ? `${prediction.horizon_days} дн.` : "—"}</h2>
               <p className="text-muted">до {forecastDate ? formatDateTime(forecastDate) : "—"}</p>
               <div className="confidence-bar">
-                <span style={{ width: `${Math.min(100, Math.max(0, accuracy))}%` }} />
+                <span style={{ width: `${Math.min(100, Math.max(0, reliability.percent))}%` }} />
               </div>
-              <p className="text-muted">confidence: {accuracy.toFixed(1)}%</p>
+              <p className="text-muted">Надёжность: {reliability.label}</p>
             </div>
           </div>
 
@@ -318,10 +312,11 @@ export default function AssetSimulator() {
               <div>
                 <h3>График прогноза цены</h3>
                 <p className="text-muted">
-                  Факт строится по свечам, базовый прогноз и сценарий вынесены в будущую точку на горизонт модели.
+                  Синяя линия — история цены, зелёный пунктир — ориентир на выбранный срок,
+                  жёлтая линия появляется после сценарного расчёта.
                 </p>
               </div>
-              <span className="market-pill up">generated {formatDateTime(prediction?.generated_at)}</span>
+              <span className="market-pill up">обновлено {formatDateTime(prediction?.generated_at)}</span>
             </div>
             <div className="chart-panel large">
               <ResponsiveContainer width="100%" height="100%">
@@ -366,13 +361,13 @@ export default function AssetSimulator() {
 
           <div className="dashboard-grid">
             <div className="card">
-              <h3>Сценарный расчёт</h3>
-              <p className="text-muted">Меняйте макрофакторы и сравнивайте сценарный прогноз с базовым.</p>
+              <h3>Сценарий рынка</h3>
+              <p className="text-muted">Измените несколько рыночных условий и сравните результат с базовым прогнозом.</p>
 
               <div className="factor-grid mt-4">
                 {Object.entries(factors).map(([code, value]) => (
                   <div key={code} className="form-field">
-                    <label htmlFor={`factor-${code}`}>{code}</label>
+                    <label htmlFor={`factor-${code}`}>{FACTOR_LABELS[code] || code}</label>
                     <input
                       id={`factor-${code}`}
                       type="text"
@@ -392,7 +387,7 @@ export default function AssetSimulator() {
             <div className="card premium-card">
               <h3>Результат сценария</h3>
               {!scenarioResult ? (
-                <p className="text-muted">Укажите факторы и нажмите кнопку расчёта.</p>
+                <p className="text-muted">Укажите условия рынка и нажмите кнопку расчёта.</p>
               ) : (
                 <>
                   <p className="text-muted">Текущая цена: {formatMoney(scenarioResult.current_price)}</p>
@@ -401,7 +396,9 @@ export default function AssetSimulator() {
                     Отклонение: {scenarioResult.impact_percent >= 0 ? "+" : ""}
                     {formatNumber(scenarioResult.impact_percent)}%
                   </p>
-                  <p className="text-muted">confidence: {getAccuracyPercent(scenarioResult.confidence_score).toFixed(1)}%</p>
+                  <p className="text-muted">
+                    Надёжность сценария: {getReliability(scenarioResult.confidence_score).label}
+                  </p>
                 </>
               )}
             </div>
@@ -409,16 +406,16 @@ export default function AssetSimulator() {
 
           <div className="dashboard-grid">
             <div className="card">
-              <h3>Влияние признаков</h3>
+              <h3>Что влияет на прогноз</h3>
               {driverChartData.length ? (
                 <div className="chart-panel">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={driverChartData} margin={{ top: 10, right: 16, left: 0, bottom: 10 }}>
                       <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
-                      <XAxis dataKey="code" tick={{ fill: "var(--text-muted)", fontSize: 12 }} />
+                      <XAxis dataKey="label" tick={{ fill: "var(--text-muted)", fontSize: 12 }} />
                       <YAxis tick={{ fill: "var(--text-muted)", fontSize: 12 }} />
-                      <Tooltip formatter={(value, name) => [formatNumber(value, 4), name]} />
-                      <Bar dataKey="absContribution" name="Абс. вклад" fill="#38bdf8" radius={[8, 8, 0, 0]} />
+                      <Tooltip formatter={(value) => [formatMoney(value), "Влияние на цену"]} />
+                      <Bar dataKey="absContribution" name="Влияние" fill="#38bdf8" radius={[8, 8, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
@@ -428,17 +425,15 @@ export default function AssetSimulator() {
             </div>
 
             <div className="card">
-              <h3>Метрики модели</h3>
+              <h3>Как читать прогноз</h3>
               <div className="metric-chip-list large">
-                {metrics.length ? (
-                  metrics.map(([key, value]) => <span key={key}>{key}: {String(value)}</span>)
-                ) : (
-                  <span>Метрики пока не сохранены</span>
-                )}
+                <span>Не является инвестсоветом</span>
+                <span>Обновляется по рынку</span>
+                <span>Горизонт выбираете вы</span>
               </div>
-              <p className="text-muted mt-4">Артефакт: {modelMeta?.artifact_path || "не указан"}</p>
-              <p className="text-muted">
-                Обучение: {modelMeta?.training_window_start || "seed"} → {modelMeta?.training_window_end || "текущие данные"}
+              <p className="text-muted mt-4">
+                Прогноз — это ориентир по вероятному движению цены. Решение о покупке или продаже
+                лучше принимать вместе с новостями, графиком и собственным риск-профилем.
               </p>
             </div>
           </div>
@@ -446,34 +441,32 @@ export default function AssetSimulator() {
           <div className="card">
             <div className="section-heading-row">
               <div>
-                <h3>Датасет, на котором обучается модель</h3>
+                <h3>История цены</h3>
                 <p className="text-muted">
-                  Последние строки свечей OHLCV. Признаки модели: {features.join(", ")}.
+                  Последние торговые дни, которые используются для построения графика и прогноза.
                 </p>
               </div>
-              <span className="market-pill neutral">{candles.length} свечей загружено</span>
+              <span className="market-pill neutral">{candles.length} дней загружено</span>
             </div>
 
             <table className="market-table mt-4">
               <thead>
                 <tr>
                   <th>Дата</th>
-                  <th>PREV_CLOSE</th>
-                  <th>CLOSE target</th>
-                  <th>Volume</th>
-                  <th>Δ target</th>
+                  <th>Цена закрытия</th>
+                  <th>Объём</th>
+                  <th>Изменение</th>
                 </tr>
               </thead>
               <tbody>
                 {datasetRows.map((row) => (
                   <tr key={row.date}>
                     <td>{row.date}</td>
-                    <td>{formatMoney(row.prevClose)}</td>
-                    <td>{formatMoney(row.close)}</td>
+                    <td>{formatMoney(row.price)}</td>
                     <td>{row.volume.toLocaleString("ru-RU")}</td>
-                    <td className={row.target >= 0 ? "text-green" : "text-red"}>
-                      {row.target >= 0 ? "+" : ""}
-                      {formatMoney(row.target)}
+                    <td className={row.change >= 0 ? "text-green" : "text-red"}>
+                      {row.change >= 0 ? "+" : ""}
+                      {formatMoney(row.change)}
                     </td>
                   </tr>
                 ))}

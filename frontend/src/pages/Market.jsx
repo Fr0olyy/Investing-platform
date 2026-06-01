@@ -52,11 +52,26 @@ const getAccuracyPercent = (score) => {
   const value = Number(score || 0);
   return value <= 1 ? value * 100 : value;
 };
+const getReliability = (score) => {
+  const value = getAccuracyPercent(score);
+  if (value <= 0) return { label: "Базовая", percent: 45 };
+  if (value < 55) return { label: "Базовая", percent: Math.max(35, value) };
+  if (value < 78) return { label: "Средняя", percent: value };
+  return { label: "Высокая", percent: Math.min(95, value) };
+};
 const buildNewsHref = (item) => {
   if (item?.url && item.url.startsWith("http") && !item.url.includes("example.com")) {
     return item.url;
   }
   return `https://news.google.com/search?q=${encodeURIComponent(`${item?.ticker || ""} ${item?.title || ""}`)}`;
+};
+const FACTOR_LABELS = {
+  PREV_CLOSE: "Цена",
+  BRENT: "Нефть Brent",
+  USD_RUB: "Курс USD/RUB",
+  IMOEX: "Индекс МосБиржи",
+  KEY_RATE: "Ключевая ставка",
+  RGBI: "Гособлигации",
 };
 
 export default function Market() {
@@ -291,8 +306,7 @@ export default function Market() {
     [candles],
   );
 
-  const metrics = modelMeta?.metrics && typeof modelMeta.metrics === "object" ? Object.entries(modelMeta.metrics) : [];
-  const accuracy = getAccuracyPercent(prediction?.confidence_score);
+  const reliability = getReliability(prediction?.confidence_score);
 
   const handleSelectTicker = (ticker) => {
     setSelectedTicker(ticker);
@@ -358,8 +372,8 @@ export default function Market() {
           <p className="eyebrow">Live market cockpit</p>
           <h1>Рынок активов</h1>
           <p className="text-muted">
-            Акции теперь открываются подробно: цена, изменение, график, прогноз, точность модели,
-            обучающий датасет и реальные кликабельные новости. Данные обновляются автоматически каждые 8 секунд.
+            Акции открываются подробно: цена, изменение, график, прогноз, история торгов
+            и кликабельные новости. Данные обновляются автоматически каждые 8 секунд.
           </p>
         </div>
         <button type="button" className="btn-secondary glow-button" onClick={loadAssets} disabled={isLoadingAssets}>
@@ -455,7 +469,7 @@ export default function Market() {
                 {[
                   ["overview", "Обзор"],
                   ["forecast", "Прогноз"],
-                  ["dataset", "ML-датасет"],
+                  ["dataset", "История"],
                   ["news", "Новости"],
                 ].map(([key, label]) => (
                   <button
@@ -549,10 +563,10 @@ export default function Market() {
                       <small>до {forecastDate ? formatDateTime(forecastDate) : "—"}</small>
                     </div>
                     <div className="mini-stat">
-                      <span>Точность / confidence</span>
-                      <strong>{accuracy.toFixed(1)}%</strong>
+                      <span>Надёжность прогноза</span>
+                      <strong>{reliability.label}</strong>
                       <div className="confidence-bar">
-                        <span style={{ width: `${Math.min(100, Math.max(0, accuracy))}%` }} />
+                        <span style={{ width: `${Math.min(100, Math.max(0, reliability.percent))}%` }} />
                       </div>
                     </div>
                     <div className="mini-stat">
@@ -567,7 +581,7 @@ export default function Market() {
               {activeSection === "forecast" && (
                 <div className="dashboard-grid">
                   <div className="card prediction-box premium-card">
-                    <h3>ML-прогноз</h3>
+                    <h3>Прогноз цены</h3>
                     {prediction ? (
                       <>
                         <p className="text-muted">{prediction.summary}</p>
@@ -588,8 +602,8 @@ export default function Market() {
                           </div>
                         </div>
                         <p className="text-muted">
-                          Прогноз рассчитан {formatDateTime(prediction.generated_at)} на горизонт{" "}
-                          <strong>{prediction.horizon_days} дн.</strong>; целевая дата —{" "}
+                          Обновлено {formatDateTime(prediction.generated_at)} · срок прогноза{" "}
+                          <strong>{prediction.horizon_days} дн.</strong> · ориентир на{" "}
                           <strong>{forecastDate ? formatDateTime(forecastDate) : "—"}</strong>.
                         </p>
                       </>
@@ -599,16 +613,17 @@ export default function Market() {
                   </div>
 
                   <div className="card">
-                    <h3>Драйверы модели</h3>
+                    <h3>Что влияет на прогноз</h3>
                     {prediction?.drivers?.length ? (
                       <div className="driver-bars">
                         {prediction.drivers.map((driver) => {
                           const power = Math.min(100, Math.abs(Number(driver.contribution || 0)) * 12);
+                          const driverLabel = FACTOR_LABELS[driver.code] || driver.name || driver.code;
                           return (
                             <div className="driver-bar-row" key={driver.code}>
                               <div>
-                                <strong>{driver.code}</strong>
-                                <span>{driver.name}</span>
+                                <strong>{driverLabel}</strong>
+                                <span>{driver.contribution >= 0 ? "Поддерживает цену" : "Давит на цену"}</span>
                               </div>
                               <div className="driver-track">
                                 <span
@@ -618,7 +633,7 @@ export default function Market() {
                               </div>
                               <b className={driver.contribution >= 0 ? "text-green" : "text-red"}>
                                 {driver.contribution >= 0 ? "+" : ""}
-                                {Number(driver.contribution).toFixed(4)}
+                                {formatMoney(driver.contribution)}
                               </b>
                             </div>
                           );
@@ -634,18 +649,17 @@ export default function Market() {
               {activeSection === "dataset" && (
                 <div className="dashboard-grid">
                   <div className="card">
-                    <h3>Датасет обучения</h3>
+                    <h3>История цены</h3>
                     <p className="text-muted">
-                      Модель обучается на свечах OHLCV и макрофакторах:{" "}
-                      {(modelMeta?.feature_names || ["PREV_CLOSE", "BRENT", "USD_RUB", "IMOEX", "KEY_RATE", "RGBI"]).join(", ")}.
+                      Последние торговые дни: цена закрытия, стартовая цена дня и объём.
                     </p>
                     <table className="market-table mt-4">
                       <thead>
                         <tr>
                           <th>Дата</th>
-                          <th>Close</th>
-                          <th>Prev/Open</th>
-                          <th>Volume</th>
+                          <th>Закрытие</th>
+                          <th>Открытие</th>
+                          <th>Объём</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -663,23 +677,19 @@ export default function Market() {
 
                   <div className="card stat-stack">
                     <div className="mini-stat">
-                      <span>Модель</span>
-                      <strong>{modelMeta?.model_name || "—"}</strong>
-                      <small>статус: {modelMeta?.status || "—"}</small>
+                      <span>Режим прогноза</span>
+                      <strong>{modelMeta?.status === "READY" ? "Расширенный" : "Базовый"}</strong>
+                      <small>обновляется по рыночным данным</small>
                     </div>
                     <div className="mini-stat">
-                      <span>Окно обучения</span>
-                      <strong>{modelMeta?.training_window_start || "seed/mock"}</strong>
-                      <small>до {modelMeta?.training_window_end || "текущих данных"}</small>
+                      <span>История графика</span>
+                      <strong>{candles.length} дн.</strong>
+                      <small>для выбранного актива</small>
                     </div>
                     <div className="mini-stat">
-                      <span>Метрики</span>
-                      <strong>{metrics.length ? `${metrics.length} показ.` : "—"}</strong>
-                      <div className="metric-chip-list">
-                        {metrics.slice(0, 5).map(([key, value]) => (
-                          <span key={key}>{key}: {String(value)}</span>
-                        ))}
-                      </div>
+                      <span>Подсказка</span>
+                      <strong>Не инвестсовет</strong>
+                      <small>сверяйте прогноз с новостями и риском</small>
                     </div>
                   </div>
                 </div>

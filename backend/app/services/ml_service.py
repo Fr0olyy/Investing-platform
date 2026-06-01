@@ -206,9 +206,8 @@ class MLService:
                     base_price=float(quote.price),
                 )
                 summary = (
-                    f"Прогноз на {horizon_days} торговых дней по модели {metadata.model_name} "
-                    f"на основе MOEX/CBR/FRED данных. Прогноз ограничен риск-коридором, чтобы не показывать "
-                    f"нереалистичные разовые скачки."
+                    f"Ориентир цены на {horizon_days} торговых дней рассчитан по истории рынка "
+                    f"и ключевым рыночным факторам. Это аналитическая подсказка, а не инвестиционная рекомендация."
                 )
                 is_placeholder = False
                 confidence_score = MLService._normalize_confidence(metadata.metrics.get("r2", 0.0))
@@ -220,8 +219,8 @@ class MLService:
                     horizon_days=horizon_days,
                 )
                 summary = (
-                    f"Fallback-прогноз на {horizon_days} торговых дней: обученная модель пока "
-                    f"недоступна, поэтому используется осторожная нормированная макро-модель."
+                    f"Ориентировочный прогноз на {horizon_days} торговых дней построен по текущей цене "
+                    f"и рыночным факторам. Используйте его как дополнительный сценарий, а не как гарантию доходности."
                 )
                 is_placeholder = True
 
@@ -666,7 +665,7 @@ class MLService:
             confidence = float(value)
         except (TypeError, ValueError):
             confidence = settings.ML_PLACEHOLDER_CONFIDENCE_SCORE
-        if confidence < 0:
+        if confidence <= 0:
             confidence = settings.ML_PLACEHOLDER_CONFIDENCE_SCORE
         if confidence > 1:
             confidence = confidence / 100

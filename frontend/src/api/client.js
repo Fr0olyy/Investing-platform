@@ -1,6 +1,7 @@
 ﻿const DEFAULT_API_BASE_URL = "http://127.0.0.1:8000/api/v1";
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE_URL).replace(/\/+$/, "");
 const TOKEN_KEY = "token";
+const USER_KEY = "user";
 const NETWORK_RETRY_COUNT = 2;
 const NETWORK_RETRY_DELAY_MS = 450;
 
@@ -73,8 +74,20 @@ export const authStorage = {
     const normalized = sanitizeToken(token);
     if (normalized) localStorage.setItem(TOKEN_KEY, normalized);
   },
+  getUser() {
+    try {
+      const raw = localStorage.getItem(USER_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch {
+      return null;
+    }
+  },
+  setUser(user) {
+    if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
+  },
   clearToken() {
     localStorage.removeItem(TOKEN_KEY);
+    localStorage.removeItem(USER_KEY);
   },
 };
 
@@ -128,6 +141,7 @@ export const api = {
       const token = extractTokenFromAuthPayload(payload);
       if (!token) throw new Error("Не удалось получить токен после регистрации.");
       authStorage.setToken(token);
+      authStorage.setUser(payload.user);
       return payload.user;
     },
     async login(credentials) {
@@ -135,10 +149,13 @@ export const api = {
       const token = extractTokenFromAuthPayload(payload);
       if (!token) throw new Error("Не удалось получить токен после входа.");
       authStorage.setToken(token);
+      authStorage.setUser(payload.user);
       return payload.user;
     },
-    me() {
-      return apiClient("/auth/me");
+    async me() {
+      const user = await apiClient("/auth/me");
+      authStorage.setUser(user);
+      return user;
     },
     token(credentials) {
       const params = new URLSearchParams();
@@ -223,6 +240,17 @@ export const api = {
       if (Number.isFinite(perAssetLimit)) params.set("per_asset_limit", String(perAssetLimit));
       const suffix = params.toString() ? `?${params.toString()}` : "";
       return apiClient(`/system/news/refresh${suffix}`, { method: "POST" });
+    },
+  },
+  admin: {
+    overview() {
+      return apiClient("/admin/overview");
+    },
+    users() {
+      return apiClient("/admin/users");
+    },
+    updateUser(userId, payload) {
+      return apiClient(`/admin/users/${userId}`, { method: "PATCH", body: payload });
     },
   },
 };

@@ -14,6 +14,10 @@ os.environ["MARKET_DATA_PROVIDER"] = "mock"
 os.environ["ML_AUTO_TRAIN_ON_STARTUP"] = "false"
 
 from app.main import app  # noqa: E402
+from app.core.config import settings  # noqa: E402
+from app.core.security import get_password_hash  # noqa: E402
+from app.db.database import SessionLocal  # noqa: E402
+from app.db.models import Portfolio, User  # noqa: E402
 
 
 def test_health_and_auth_flow():
@@ -60,3 +64,54 @@ def test_registration_accepts_realistic_email():
 
         assert response.status_code == 201
         assert response.json()["user"]["email"] == "real.investor@gmail.com"
+
+
+def test_admin_panel_endpoints_require_admin_role():
+    with TestClient(app) as client:
+        investor = client.post(
+            "/api/v1/auth/register",
+            json={"email": "investor.admincheck@gmail.com", "password": "supersecure123"},
+        )
+        investor_token = investor.json()["token"]["access_token"]
+
+        forbidden = client.get(
+            "/api/v1/admin/overview",
+            headers={"Authorization": f"Bearer {investor_token}"},
+        )
+        assert forbidden.status_code == 403
+
+        with SessionLocal() as db:
+            admin = User(
+                email="admin.check@gmail.com",
+                hashed_password=get_password_hash("supersecure123"),
+                role="admin",
+                is_active=True,
+            )
+            portfolio = Portfolio(
+                user=admin,
+                cash_balance=settings.STARTING_BALANCE,
+                base_currency=settings.BASE_CURRENCY,
+            )
+            db.add_all([admin, portfolio])
+            db.commit()
+
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"email": "admin.check@gmail.com", "password": "supersecure123"},
+        )
+        assert login.status_code == 200
+        admin_token = login.json()["token"]["access_token"]
+
+        overview = client.get(
+            "/api/v1/admin/overview",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert overview.status_code == 200
+        assert overview.json()["users_total"] >= 1
+
+        users = client.get(
+            "/api/v1/admin/users",
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert users.status_code == 200
+        assert any(item["email"] == "admin.check@gmail.com" for item in users.json())

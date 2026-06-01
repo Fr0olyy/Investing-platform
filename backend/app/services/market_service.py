@@ -30,6 +30,8 @@ def money(value: Decimal | float | int) -> Decimal:
 
 
 class MarketService:
+    _last_live_refresh_attempt_at: datetime | None = None
+
     @staticmethod
     def get_asset_or_404(db: Session, ticker: str) -> Asset:
         asset = db.scalar(select(Asset).where(Asset.ticker == ticker.upper(), Asset.is_active.is_(True)))
@@ -191,6 +193,13 @@ class MarketService:
         refresh_seconds = max(0, settings.LIVE_QUOTE_REFRESH_SECONDS)
         if refresh_seconds == 0:
             return 0
+        now = datetime.now()
+
+        if (
+            MarketService._last_live_refresh_attempt_at
+            and now - MarketService._last_live_refresh_attempt_at < timedelta(seconds=refresh_seconds)
+        ):
+            return 0
 
         latest_quote = db.scalar(
             select(Quote)
@@ -198,8 +207,10 @@ class MarketService:
             .order_by(desc(Quote.recorded_at))
             .limit(1)
         )
-        if latest_quote and datetime.now() - latest_quote.recorded_at < timedelta(seconds=refresh_seconds):
+        if latest_quote and now - latest_quote.recorded_at < timedelta(seconds=refresh_seconds):
             return 0
+
+        MarketService._last_live_refresh_attempt_at = now
 
         if settings.MARKET_DATA_PROVIDER.lower() == "mock":
             return MarketService._refresh_latest_quotes_mock(db, source)
@@ -207,8 +218,8 @@ class MarketService:
         try:
             with MarketDataClient() as client:
                 return MarketService._refresh_latest_quotes_real(db, client, source)
-        except Exception:
-            logger.exception("Live quote refresh failed")
+        except Exception as exc:
+            logger.warning("Live quote refresh skipped: %s", exc)
             db.rollback()
             return 0
 
@@ -335,9 +346,9 @@ class MarketService:
                 )
                 db.commit()
                 updated += 1
-            except Exception:
+            except Exception as exc:
                 db.rollback()
-                logger.exception("Live quote refresh failed for %s", asset.ticker)
+                logger.warning("Live quote refresh failed for %s: %s", asset.ticker, exc)
 
         return updated
 
@@ -560,8 +571,8 @@ class MarketService:
         except ExternalDataError:
             db.rollback()
             return 0
-        except Exception:
-            logger.exception("News sync failed for %s", asset.ticker)
+        except Exception as exc:
+            logger.warning("News sync failed for %s: %s", asset.ticker, exc)
             db.rollback()
             return 0
 

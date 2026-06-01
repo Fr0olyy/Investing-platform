@@ -1,5 +1,6 @@
 from fastapi import APIRouter
 
+from app.api.routes.admin import router as admin_router
 from app.api.routes.assets import router as assets_router
 from app.api.routes.auth import router as auth_router
 from app.api.routes.ml import router as ml_router
@@ -15,3 +16,4 @@ api_router.include_router(portfolio_router)
 api_router.include_router(trading_router)
 api_router.include_router(ml_router)
 api_router.include_router(system_router)
+api_router.include_router(admin_router)

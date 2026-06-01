@@ -5,17 +5,38 @@
   LogOut,
   Newspaper,
   Settings,
+  ShieldCheck,
   TrendingUp,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
 import { api, authStorage } from "../api/client";
 
 export default function Sidebar() {
   const navigate = useNavigate();
   const token = authStorage.getToken();
+  const [user, setUser] = useState(() => (authStorage.getToken() ? authStorage.getUser() : null));
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!token) return undefined;
+
+    api.auth.me()
+      .then((payload) => {
+        if (!cancelled) setUser(payload);
+      })
+      .catch(() => {
+        if (!cancelled) setUser(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
 
   const handleLogout = () => {
     api.auth.logout();
+    setUser(null);
     navigate("/login");
   };
 
@@ -39,14 +60,19 @@ export default function Sidebar() {
           <Newspaper size={18} /> Новости
         </NavLink>
         <NavLink to="/ml" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
-          <LineChart size={18} /> ML-анализ
+          <LineChart size={18} /> Прогноз
         </NavLink>
+        {user?.role === "admin" && (
+          <NavLink to="/admin" className={({ isActive }) => (isActive ? "nav-link active" : "nav-link")}>
+            <ShieldCheck size={18} /> Админ
+          </NavLink>
+        )}
       </nav>
 
       <div className="sidebar-footer">
         {token ? (
           <div className="user-profile-link">
-            <div className="avatar">AI</div>
+            <div className="avatar">{user?.role === "admin" ? "AD" : "IN"}</div>
             <div className="user-info">
               <NavLink to="/profile" className="user-name-link">
                 Профиль
