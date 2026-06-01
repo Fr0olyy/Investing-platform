@@ -39,29 +39,89 @@ def money(value: Decimal | float | int) -> Decimal:
 class MLService:
     @staticmethod
     def train_models(db: Session, tickers: list[str] | None = None) -> int:
+        trained_count, _diagnostics = MLService.train_models_with_diagnostics(db, tickers=tickers)
+        return trained_count
+
+    @staticmethod
+    def train_models_with_diagnostics(
+        db: Session,
+        tickers: list[str] | None = None,
+    ) -> tuple[int, list[dict[str, Any]]]:
         MLService._ensure_ml_directories()
         trained_count = 0
+        diagnostics: list[dict[str, Any]] = []
         assets_query = select(Asset).where(Asset.is_active.is_(True))
         if tickers:
             assets_query = assets_query.where(Asset.ticker.in_([ticker.upper() for ticker in tickers]))
         assets = db.scalars(assets_query.order_by(Asset.ticker)).all()
 
         if settings.MARKET_DATA_PROVIDER.lower() == "mock":
-            return 0
+            return 0, [
+                {
+                    "ticker": asset.ticker,
+                    "status": "skipped",
+                    "reason": "MARKET_DATA_PROVIDER=mock: real market data is disabled.",
+                    "rows": 0,
+                    "test_rows": None,
+                }
+                for asset in assets
+            ]
 
         try:
             with MarketDataClient() as client:
-                for asset in assets:
-                    if MLService._train_single_model(db, asset, client):
-                        trained_count += 1
-        except ExternalDataError:
-            db.rollback()
-            return trained_count
-        except Exception:
-            db.rollback()
-            return trained_count
+                end_date = date.today()
+                start_date = end_date - timedelta(days=settings.ML_LOOKBACK_YEARS * 365)
+                macro_history, macro_warnings = MLService._fetch_macro_history_for_training(
+                    db,
+                    client,
+                    start_date,
+                    end_date,
+                )
+                MLService._persist_macro_history(db, macro_history)
 
-        return trained_count
+                for asset in assets:
+                    try:
+                        diagnostic = MLService._train_single_model(db, asset, client, macro_history=macro_history)
+                    except ExternalDataError as exc:
+                        db.rollback()
+                        diagnostic = MLService._training_diagnostic(
+                            asset,
+                            status="failed",
+                            reason=f"External data error: {exc}",
+                        )
+                    except Exception as exc:
+                        db.rollback()
+                        diagnostic = MLService._training_diagnostic(
+                            asset,
+                            status="failed",
+                            reason=f"Unexpected training error: {type(exc).__name__}: {exc}",
+                        )
+
+                    if macro_warnings:
+                        warning = "Macro fallbacks used: " + "; ".join(macro_warnings)
+                        diagnostic["reason"] = (
+                            f"{diagnostic['reason']} {warning}" if diagnostic.get("reason") else warning
+                        )
+
+                    diagnostics.append(diagnostic)
+                    if diagnostic["status"] == "trained":
+                        trained_count += 1
+        except ExternalDataError as exc:
+            db.rollback()
+            reason = f"External data client error: {exc}"
+            diagnostics.extend(
+                MLService._training_diagnostic(asset, status="failed", reason=reason) for asset in assets
+            )
+            return trained_count, diagnostics
+        except Exception as exc:
+            db.rollback()
+            reason = f"Unexpected data client error: {type(exc).__name__}: {exc}"
+            diagnostics.extend(
+                MLService._training_diagnostic(asset, status="failed", reason=reason) for asset in assets
+            )
+            return trained_count, diagnostics
+
+        return trained_count, diagnostics
 
     @staticmethod
     def get_model_metadata(db: Session, ticker: str) -> ModelMetadataResponse:
@@ -250,15 +310,39 @@ class MLService:
         )
 
     @staticmethod
-    def _train_single_model(db: Session, asset: Asset, client: MarketDataClient) -> bool:
-        dataset = MLService._build_training_dataset(db, asset, client)
-        if dataset is None or len(dataset) < settings.ML_MIN_DATA_POINTS:
-            return False
+    def _train_single_model(
+        db: Session,
+        asset: Asset,
+        client: MarketDataClient,
+        macro_history: dict[str, pd.DataFrame] | None = None,
+    ) -> dict[str, Any]:
+        dataset = MLService._build_training_dataset(db, asset, client, macro_history=macro_history)
+        rows_count = 0 if dataset is None else len(dataset)
+        if dataset is None:
+            return MLService._training_diagnostic(
+                asset,
+                status="skipped",
+                reason="Training dataset is empty. Check MOEX history and macro sources.",
+                rows=rows_count,
+            )
+        if rows_count < settings.ML_MIN_DATA_POINTS:
+            return MLService._training_diagnostic(
+                asset,
+                status="skipped",
+                reason=f"Not enough rows for training: {rows_count}, required at least {settings.ML_MIN_DATA_POINTS}.",
+                rows=rows_count,
+            )
 
         feature_names = FEATURE_ORDER
         test_size = max(int(len(dataset) * settings.ML_TEST_RATIO), 30)
         if len(dataset) <= test_size + 10:
-            return False
+            return MLService._training_diagnostic(
+                asset,
+                status="skipped",
+                reason=f"Dataset is too small after train/test split: {len(dataset)} rows, test size {test_size}.",
+                rows=len(dataset),
+                test_rows=test_size,
+            )
 
         train_df = dataset.iloc[:-test_size].copy()
         test_df = dataset.iloc[-test_size:].copy()
@@ -321,18 +405,102 @@ class MLService:
         )
 
         db.commit()
-        return True
+        return MLService._training_diagnostic(
+            asset,
+            status="trained",
+            reason="Model trained successfully.",
+            rows=len(dataset),
+            test_rows=test_size,
+        )
 
     @staticmethod
-    def _build_training_dataset(db: Session, asset: Asset, client: MarketDataClient) -> pd.DataFrame | None:
+    def _training_diagnostic(
+        asset: Asset,
+        status: str,
+        reason: str | None = None,
+        rows: int | None = None,
+        test_rows: int | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "ticker": asset.ticker,
+            "status": status,
+            "reason": reason,
+            "rows": rows,
+            "test_rows": test_rows,
+        }
+
+    @staticmethod
+    def _fetch_macro_history_for_training(
+        db: Session,
+        client: MarketDataClient,
+        start_date: date,
+        end_date: date,
+    ) -> tuple[dict[str, pd.DataFrame], list[str]]:
+        latest_values = MarketService.get_latest_macro_values(db)
+        warnings: list[str] = []
+        fetchers = {
+            "BRENT": client.fetch_brent_history,
+            "USD_RUB": client.fetch_usd_rub_history,
+            "IMOEX": lambda start, end: client.fetch_index_history("IMOEX", start, end)[["date", "close"]].rename(
+                columns={"close": "value"}
+            ),
+            "RGBI": lambda start, end: client.fetch_index_history("RGBI", start, end)[["date", "close"]].rename(
+                columns={"close": "value"}
+            ),
+            "KEY_RATE": client.fetch_key_rate_history,
+        }
+        history: dict[str, pd.DataFrame] = {}
+
+        for code, fetcher in fetchers.items():
+            try:
+                frame = fetcher(start_date, end_date)
+                if frame.empty:
+                    raise ExternalDataError(f"{code} history is empty.")
+                history[code] = frame[["date", "value"]].copy()
+            except Exception as exc:
+                history[code] = MLService._fallback_macro_history(code, start_date, end_date, latest_values)
+                warnings.append(f"{code}: {type(exc).__name__}: {exc}")
+
+        return history, warnings
+
+    @staticmethod
+    def _fallback_macro_history(
+        code: str,
+        start_date: date,
+        end_date: date,
+        latest_values: dict[str, float],
+    ) -> pd.DataFrame:
+        defaults = {
+            "BRENT": 80.0,
+            "USD_RUB": 90.0,
+            "IMOEX": 3000.0,
+            "KEY_RATE": 15.0,
+            "RGBI": 105.0,
+        }
+        value = float(latest_values.get(code, defaults.get(code, 0.0)))
+        return pd.DataFrame(
+            {
+                "date": pd.date_range(start=start_date, end=end_date, freq="D"),
+                "value": value,
+            }
+        )
+
+    @staticmethod
+    def _build_training_dataset(
+        db: Session,
+        asset: Asset,
+        client: MarketDataClient,
+        macro_history: dict[str, pd.DataFrame] | None = None,
+    ) -> pd.DataFrame | None:
         end_date = date.today()
         start_date = end_date - timedelta(days=settings.ML_LOOKBACK_YEARS * 365)
         asset_history = client.fetch_share_history(asset.ticker, start_date, end_date, board=asset.board)
         if asset_history.empty:
             return None
 
-        macro_history = client.fetch_macro_history(start_date, end_date)
-        MLService._persist_macro_history(db, macro_history)
+        if macro_history is None:
+            macro_history = client.fetch_macro_history(start_date, end_date)
+            MLService._persist_macro_history(db, macro_history)
 
         dataset = asset_history[["date", "close"]].rename(columns={"close": "asset_close"}).copy()
         for code, frame in macro_history.items():

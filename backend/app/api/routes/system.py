@@ -6,7 +6,7 @@ from app.api.dependencies import get_current_admin
 from app.core.config import settings
 from app.db.database import get_db
 from app.db.models import User
-from app.schemas.system import BackgroundRefreshResponse, HealthResponse
+from app.schemas.system import BackgroundRefreshResponse, HealthResponse, MLTrainingResponse
 from app.services.bootstrap_service import background_jobs_enabled
 from app.services.market_service import MarketService
 from app.services.ml_service import MLService
@@ -52,18 +52,19 @@ def refresh_market_data(
 
 @router.post(
     "/ml/train",
-    response_model=BackgroundRefreshResponse,
+    response_model=MLTrainingResponse,
     summary="Обучение ML-моделей",
     description="Обучает модели по доступным активам.",
 )
 def train_models(
     db: Session = Depends(get_db),
     _current_admin: User = Depends(get_current_admin),
-) -> BackgroundRefreshResponse:
-    trained_models = MLService.train_models(db)
-    return BackgroundRefreshResponse(
-        message="ML-модели обучены.",
+) -> MLTrainingResponse:
+    trained_models, diagnostics = MLService.train_models_with_diagnostics(db)
+    return MLTrainingResponse(
+        message="ML-models trained." if trained_models else "ML-models were not trained. Check diagnostics.",
         affected_records=trained_models,
+        diagnostics=diagnostics,
     )
 
 
